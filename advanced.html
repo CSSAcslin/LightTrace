@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#132a2d">
+  <title>光迹 Pro · 曲面光学工作站</title>
+  <link rel="stylesheet" href="advanced.css"><link rel="stylesheet" href="advanced-editor.css"><link rel="stylesheet" href="advanced-inspector.css">
+  <link rel="stylesheet" href="manual.css">
+</head>
+<body>
+<header class="topbar">
+  <a class="identity" href="index.html" title="返回基础实验室"><svg viewBox="0 0 40 40" aria-hidden="true"><rect width="40" height="40" rx="10" fill="#27584d"/><g fill="none" stroke="#c8efcc" stroke-width="1.4"><path d="M5 30 35 10M5 10l30 20M20 5c-8 7-8 23 0 30 8-7 8-23 0-30Z"/></g></svg><strong>光迹</strong><span>PRO</span></a>
+  <div class="mode-links"><a href="index.html">基础实验室</a><b>进阶工作站</b></div>
+  <div class="top-tools"><button id="guideOpen" aria-haspopup="dialog">实验手册</button><span id="saveStatus"><i></i>本地工作区</span></div>
+</header>
+<main class="bench-page">
+  <div class="project-head"><div><div class="kicker">OPTICAL DESIGN <span>/</span> MERIDIONAL RAY TRACING</div><h1>曲面光学工作站</h1><p>从光源出发，跟随每一次折射、反射与衍射，直到探测面。</p></div>
+    <div class="project-actions"><button id="undo" title="撤销（Ctrl+Z）" aria-label="撤销">↶</button><button id="redo" title="重做（Ctrl+Shift+Z）" aria-label="重做">↷</button><div class="action-sep"></div><button id="importScene">导入实验</button><button id="exportScene" class="accent">↓ 保存实验</button><input id="sceneFile" type="file" accept=".json,application/json" hidden></div>
+  </div>
+  <div class="preset-bar"><div class="preset-block"><label for="preset">实验台</label><select id="preset" aria-label="进阶实验预设"></select></div><p id="presetDescription"></p><button id="objectTool" class="object-tool" title="在当前系统中添加或编辑一维图案物体"><span aria-hidden="true">▤</span> 物体与图案</button><button id="mobileTools" aria-controls="designPanel" aria-expanded="false">配置光学系统</button></div>
+  <div class="layout">
+    <aside id="designPanel"><div class="side-title"><div class="kicker">SYSTEM EDITOR</div><h2>系统配置</h2><button id="closeTools" aria-label="关闭配置">×</button></div><div id="editor"></div></aside>
+    <div class="main-column">
+      <section class="stage" aria-label="曲面光路画布">
+        <div class="stage-title"><div><i class="status-dot"></i><h2>光路视图</h2><span class="section-code">LAYOUT / 2D</span></div><div class="view-tools"><button id="zoomOut" aria-label="缩小">−</button><output id="zoomPct">100%</output><button id="zoomIn" aria-label="放大">＋</button><button id="fit" title="显示完整系统">适配</button><button id="savePng" title="导出当前光路图 PNG">↓ PNG</button></div></div>
+        <div id="plot"><canvas id="layoutCanvas" aria-label="光线追迹画布，可选择、拖动、旋转光学元件，也可在参数框精确输入。" tabindex="0"></canvas>
+          <div class="plot-overlay"><div class="mode-tools" role="group" aria-label="画布工具"><button id="toolSelect" aria-pressed="true" title="拖动元件，或点击光线查看演算">选择</button><button id="toolPan" aria-pressed="false">平移</button><button id="toolRuler" aria-pressed="false" title="依次点击两个位置测量距离">测距</button></div><span id="traceBadge">正在计算</span></div>
+          <div class="plot-bottom"><span id="cursorPos">x 0.0　y 0.0 mm</span><span id="toolHint">拖动元件定位 · 滚轮缩放</span></div>
+        </div>
+        <div class="stage-toolbar"><label><input id="axis" type="checkbox" checked>元件光轴</label><label><input id="cardinal" type="checkbox" checked>焦点 / 主面</label><label><input id="snap" type="checkbox" checked>磁吸</label><span class="divider"></span><button id="canvasSettings" aria-expanded="false" aria-controls="viewOptions">画布设置 ⌄</button></div>
+        <div id="viewOptions" hidden><label>显示网格<input id="grid" type="checkbox" checked></label><label>网格步长<select id="gridStep"><option value="5">5 mm</option><option value="10">10 mm</option><option value="25">25 mm</option><option value="50">50 mm</option></select></label><label>线条透明度<input id="opacity" type="range" min="15" max="100"></label><label>底色<select id="theme"><option value="dark">墨绿</option><option value="navy">深蓝</option><option value="light">象牙白</option></select></label><label>波长着色<input id="spectral" type="checkbox" checked></label><label>近轴像面 / 虚像反向线<input id="imagePlane" type="checkbox" checked></label><label>同组联动<input id="groupLock" type="checkbox" checked></label><label>所有近轴标记<input id="allMarks" type="checkbox"></label><p>磁吸：拖动时靠近另一镜片的光轴、焦点或网格会自动贴合；按住 Alt 可暂时自由移动。选择器件后拖动圆形手柄可旋转。</p></div>
+      </section>
+      <div id="statusLine" role="status"></div>
+      <section id="inspection" aria-label="追迹结果与逐面演算"></section>
+    </div>
+  </div>
+  <footer class="page-foot"><span>光迹 PRO　/　二维子午面几何光学</span><a href="index.html">返回基础实验室 ↗</a></footer>
+</main>
+<div id="notice" role="status" hidden></div>
+<script src="manual-basic.js"></script><script src="manual-advanced.js"></script><script src="manual.js"></script>
+<script src="mie-phase.js"></script><script src="advanced-optics.js"></script><script src="advanced-editor.js"></script><script src="advanced-inspector.js"></script><script src="advanced-canvas.js"></script><script src="advanced.js"></script>
+</body></html>

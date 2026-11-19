@@ -1,0 +1,24 @@
+# Local dependencies, editor settings and operating system files
+node_modules/
+.vscode/
+.idea/
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# Local configuration and diagnostics
+.env
+.env.*
+!.env.example
+*.log
+coverage/
+
+# Local development screenshots; README artwork is kept in docs/images/
+/preview.jpg
+/advanced-preview.jpg
+/object-preview.jpg
+/mixed-energy-preview.jpg
+/mie-pattern-preview.jpg
+/manual-preview.jpg
+/manual-header-fix.jpg
+/folded-bench-comparison.png

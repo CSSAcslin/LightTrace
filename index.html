@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#174f46"><meta name="description" content="可拖拽的多镜片近轴光学实验室，实时探索光路、实像、虚像与放大率。">
+  <title>光迹 · 交互光学实验室</title><link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="manual.css">
+</head>
+<body>
+  <header class="app-header">
+    <a class="brand" href="index.html" aria-label="光迹首页"><span class="brand-symbol"><svg viewBox="0 0 32 32"><path d="M3 25 29 7M3 7l26 18M16 3c-7 8-7 18 0 26 7-8 7-18 0-26Z"/></svg></span><span>光迹<span class="brand-en">OPTICAL BENCH</span></span></a>
+    <nav><span class="nav-active">光学实验室</span><a class="pro-entry" href="advanced.html">进阶工作站 ↗</a></nav>
+    <div class="header-right"><button id="helpButton" aria-haspopup="dialog">实验手册</button><span class="local-badge"><i></i> 本地运行 · 自动保存</span><button class="icon-button" id="resetButton" title="重置为初始实验" aria-label="重置实验">↺</button></div>
+  </header>
+  <main>
+    <div class="page-heading"><div><div class="eyebrow">INTERACTIVE OPTICS LAB <span>/ 01</span></div><h1>探索光的每一条路径<span>。</span></h1><p>移动镜片，改变参数，让成像过程触手可及。</p></div><div class="file-actions"><button class="button secondary" id="importButton"><span>↥</span> 导入实验</button><button class="button primary" id="exportButton"><span>↧</span> 保存实验</button><input id="importFile" type="file" accept=".json,application/json" hidden></div></div>
+    <div class="workspace">
+      <aside class="panel controls" id="controlPanel">
+        <div class="panel-title"><span>实验配置</span><span class="small-label">PARAMETERS</span><button class="mobile-done" id="mobileDone">完成 ✓</button></div>
+        <section class="control-section"><label class="section-label" for="presetSelect"><span class="section-number">01</span> 光学系统预设</label><select id="presetSelect"><option value="convex">单凸透镜 · 实像成像</option><option value="virtual">放大镜 · 正立虚像</option><option value="concave">凹透镜 · 发散光路</option><option value="relay">双透镜 · 4f 中继系统</option><option value="telescope">双透镜 · 开普勒望远镜</option><option value="microscope">双透镜 · 复合显微镜</option><option value="custom" hidden>自定义实验</option></select><p class="preset-note" id="presetNote"></p></section>
+        <section class="control-section"><div class="section-label"><span class="section-number">02</span> 物体与观察屏 <span class="unit-tag">mm</span></div>
+          <div class="field"><label for="objectX">物体位置 <span>x₀</span></label><div class="number-wrap"><input id="objectX" type="number" min="-1000" max="195" step="1" value="0"><span>mm</span></div></div><input aria-label="物体位置滑块" id="objectXRange" type="range" min="-400" max="195" value="0">
+          <div class="field"><label for="objectHeight">物体高度 <span>h₀</span></label><div class="number-wrap"><input id="objectHeight" type="number" min="5" max="150" step="1" value="36"><span>mm</span></div></div><input aria-label="物体高度滑块" id="objectHeightRange" type="range" min="5" max="150" value="36">
+          <div class="field screen-field"><label for="screenX">观察屏位置 <span>xₛ</span></label><div class="number-wrap"><input id="screenX" type="number" min="205" max="4000" value="500"><span>mm</span></div></div><button class="text-button" id="focusScreen">◎ 将观察屏移至实像面</button>
+        </section>
+        <section class="control-section lens-section"><div class="section-label"><span class="section-number">03</span> 镜片组 <span class="count-tag" id="lensCount">1 / 8</span></div><div id="lensList"></div><div class="add-lens"><button id="addConvex">＋ 凸透镜</button><button id="addConcave">＋ 凹透镜</button></div></section>
+        <div class="model-note"><span>ⓘ</span><p>薄透镜 · 近轴几何光学<br><span>所有长度以毫米为单位，光沿 +x 方向传播。</span></p></div>
+      </aside>
+      <div class="experiment"><div class="mobile-bar"><label for="quickPreset">实验预设</label><select id="quickPreset" aria-label="快捷实验预设"></select><button id="mobileConfigure" aria-expanded="false" aria-controls="controlPanel">调参数 ☷</button></div>
+        <section class="optical-stage">
+          <div class="stage-header"><div><span class="live-dot"></span><h2>光路工作台</h2><span class="stage-subtitle">RAY DIAGRAM</span></div><div class="stage-actions"><button id="playButton" title="暂停光线动画" aria-label="暂停光线动画">Ⅱ</button><span class="toolbar-divider"></span><button id="zoomOut" title="缩小" aria-label="缩小">−</button><span id="zoomValue">100%</span><button id="zoomIn" title="放大" aria-label="放大">＋</button><button id="fitButton" title="适应画布" aria-label="适应画布"><svg viewBox="0 0 20 20"><path d="M7 3H3v4m10-4h4v4M3 13v4h4m10-4v4h-4"/></svg></button><button id="snapshotButton" title="导出光路 PNG" aria-label="导出光路 PNG"><svg viewBox="0 0 20 20"><path d="M3 14v3h14v-3M10 2v10m-4-4 4 4 4-4"/></svg></button></div></div>
+          <div class="canvas-wrap" id="canvasWrap"><canvas id="opticalCanvas" tabindex="0" aria-label="交互光路图。可拖动镜片、物体和观察屏。所有参数也可用左侧输入框调整。"></canvas><div class="canvas-topline"><span id="systemName">单凸透镜成像</span><span>空气介质 <b>n = 1.00</b></span></div><div class="canvas-hint"><span>↔ 拖动元件</span><span>⊕ 滚轮缩放</span><span>⤧ 拖动空白平移</span></div><div class="canvas-coordinate" id="coordinates">x 0.0 · y 0.0 mm</div><div id="infinityNotice" class="infinity-notice" hidden>出射光线平行 · 像在无穷远</div></div>
+          <div class="stage-footer"><div class="display-options"><label><input type="checkbox" id="showGrid" checked>网格</label><label><input type="checkbox" id="showFoci" checked>焦点</label><label><input type="checkbox" id="showVirtual" checked>虚像延长线</label></div><div class="ray-density"><label for="rayCount">光线</label><input type="range" id="rayCount" min="3" max="31" step="2" value="9"><output id="rayCountValue">9</output></div></div>
+        </section>
+        <div class="metrics" aria-live="polite"><article class="metric"><div>成像性质 <span>IMAGE</span></div><strong id="imageType">倒立实像</strong><p id="imageTypeNote">可在观察屏上接收</p></article><article class="metric"><div>像距 <span>v</span></div><strong id="imageDistance">300.0 <small>mm</small></strong><p>相对于最后一片透镜</p></article><article class="metric"><div>横向放大率 <span>m</span></div><strong id="magnification">−1.50 <small>×</small></strong><p id="magnificationNote">倒立 · 放大</p></article><article class="metric"><div>系统等效焦距 <span>fₑ</span></div><strong id="effectiveFocal">120.0 <small>mm</small></strong><p id="eflNote">组合系统的光焦度</p></article></div>
+        <div class="bottom-panels"><section class="panel image-panel"><div class="panel-title"><span>物像对照</span><span class="small-label">IMAGE PREVIEW</span></div><canvas id="imageCanvas" aria-label="物体与最终像的方向和大小示意"></canvas><div class="image-caption"><span><i class="legend-dot object-dot"></i> 物体</span><span><i class="legend-dot image-dot"></i> 最终像 <b id="imageHeightLabel"></b></span></div><div class="screen-readout"><span>观察屏离焦量 <b id="screenDefocus">0.0 mm</b></span><span>尖端光束半径 <b id="screenBlur">0.0 mm</b></span></div><p class="micro-note">物像按统一比例示意；屏上光束半径为几何估计。</p></section>
+        <section class="panel analysis-panel"><div class="panel-title"><span>系统分析</span><button id="detailsButton" class="text-button">模型说明 ↗</button></div><div class="matrix-row"><div><div class="small-label">OBJECT → LAST LENS</div><p>近轴传递矩阵</p></div><div class="matrix"><span id="matrixA">1.000</span><span id="matrixB">200.000</span><span id="matrixC">−0.008</span><span id="matrixD">−0.667</span></div></div><div class="analysis-divider"></div><div class="stage-table-header"><span>逐级成像</span><span>全局像位置 / 累计放大率</span></div><div id="stageTable"></div><p class="optics-message" id="opticsMessage"></p></section></div>
+        <footer class="workspace-footer"><span>光迹 / 每一次调整，都是一次发现。</span><span>PARAXIAL OPTICS · v1.0</span></footer>
+      </div>
+    </div>
+  </main>
+  <div id="toast" role="status" hidden></div>
+
+  <script src="manual-basic.js"></script><script src="manual-advanced.js"></script><script src="manual.js"></script>
+<script src="optics.js"></script><script src="app.js"></script>
+</body>
+</html>
