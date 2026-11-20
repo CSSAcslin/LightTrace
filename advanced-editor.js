@@ -8,13 +8,18 @@
 
   const labels = {
     source: '光源', lens: '厚透镜', object: '图案物体', stop: '孔径光阑',
-    mirror: '平面反光镜', grating: '透射光栅', screen: '探测屏'
+    mirror: '平面反光镜', grating: '透射光栅', polarizer: '线偏振片', retarder: '波片', screen: '探测屏'
   };
-  const symbols = {source: '☼', lens: '()', object: '▤', stop: '┤├', mirror: '╱', grating: '▥', screen: '┆'};
+  const symbols = {source: '☼', lens: '()', object: '▤', stop: '┤├', mirror: '╱', grating: '▥', polarizer: 'P', retarder: 'λ', screen: '┆'};
   const materials = {BK7: 'N-BK7 · 冕玻璃', F2: 'F2 · 火石玻璃', SILICA: '熔融石英', CUSTOM: '自定义折射率'};
   const shapes = {plane: '平面', sphere: '球面', conic: '圆锥面', asphere: '偶次非球面'};
   const spatial = {collimated: '平行光束', point: '发散点光源', field: '多视场物点'};
   const spectra = {mono: '单色', rgb: '三条谱线', band: '宽谱采样'};
+  const polarizations = {
+    unpolarized: '非偏振', linear: '线偏振', left: '左旋圆偏振（V+）',
+    right: '右旋圆偏振（V−）', elliptical: '椭圆偏振'
+  };
+  const sourcePolDefaults = {polarization: 'unpolarized', polAngle: 0, ellipticity: 22.5, polDegree: 1};
   const objectModes = {mixed: '混合材质 · 逐格绘制', scatter: '透射侧余弦散射（旧）', reflect: '镜面反射', refract: '楔片折射'};
   const fractionNames = {scatter: '散射', reflection: '镜面反射', transmission: '透明介质', absorption: '吸收'};
   const paintChannels = ['scatter', 'reflection', 'transmission'];
@@ -31,13 +36,15 @@
   };
   const defaults = {
     source: {x: 0, y: 0, angle: 0, type: 'collimated', height: 8, width: 28, spread: 5,
-      spectrum: 'band', wavelength: 560, bandwidth: 180, rays: 13},
+      spectrum: 'band', wavelength: 560, bandwidth: 180, rays: 13, ...sourcePolDefaults},
     lens: {aperture: 36, thickness: 7, material: 'BK7', n: 1.5,
       r1: 75, r2: -75, k1: 0, k2: 0, a41: 0, a42: 0, shape1: 'sphere', shape2: 'sphere', group: ''},
     object: {aperture: 16, interaction: 'mixed', pattern: patternPresets.bars.values,
       fractions: defaultFractions, scatterAngle: 3, scatterSamples: 5, n: 1.52, thickness: 4, wedge: 0},
     stop: {aperture: 14, outerDiameter: 72}, mirror: {aperture: 55},
-    grating: {aperture: 45, lines: 600, order: 1}, screen: {aperture: 80}
+    grating: {aperture: 45, lines: 600, order: 1}, screen: {aperture: 80},
+    polarizer: {aperture: 36, axisAngle: 0},
+    retarder: {aperture: 36, axisAngle: 0, retardance: 90, referenceWavelength: 550}
   };
   function element(type, id, name, x, extras = {}) {
     return {id, type, name, x, y: 0, angle: 0, ...defaults[type], ...extras};
@@ -45,7 +52,7 @@
   const source = (extras = {}) => ({...defaults.source, ...extras});
   const lens = (x, extras = {}) => element('lens', 'l1', '物镜 L1', x, extras);
   const screen = (x, extras = {}) => element('screen', 's1', '探测屏', x, extras);
-  const preset = (name, description, emitter, elements) => ({name, description, source: emitter, elements});
+  const preset = (name, description, emitter, elements, selected) => ({name, description, source: emitter, elements, selected});
 
   // Place the relay surfaces from the actual paraxial focal planes of the
   // symmetric thick lenses. Reference wavelength 546.074 nm (mercury e line).
@@ -132,6 +139,13 @@
     spectrum: preset('透射光栅分光', '宽谱光垂直入射。改变刻线密度或衍射级次，观察不同波长在屏上的位置。',
       source({width: 8, wavelength: 550, bandwidth: 280, rays: 5}),
       [element('grating', 'g1', '透射光栅', 60), screen(160, {y: 37, aperture: 85})]),
+    polarizationMalus: preset('马吕斯定律 · 双偏振片', '起偏片从非偏振光中透过一半能量。改变检偏片透光轴角，比较屏上通量与 cos²θ 的关系。',
+      source({spectrum: 'mono', wavelength: 550, rays: 9, width: 18}),
+      [element('polarizer', 'pol1', '起偏片', 50), element('polarizer', 'pol2', '检偏片', 100, {axisAngle: 45}),
+        screen(150)], 'pol2'),
+    polarizationQuarter: preset('四分之一波片 · 线偏振转圆偏振', '45° 线偏振光通过快轴为 0° 的四分之一波片。切换到半波设置，比较屏上的偏振椭圆。',
+      source({spectrum: 'mono', wavelength: 550, rays: 9, width: 18, polarization: 'linear', polAngle: 45}),
+      [element('retarder', 'wp1', '波片', 75), screen(150)], 'wp1'),
     folded: preset('折叠成像光路', '反光镜将光束折转 90°，竖直放置的镜片将其聚焦。旋转反光镜检查反射方向。',
       source({spectrum: 'mono', wavelength: 546.074, width: 20}),
       [element('mirror', 'm1', '转向反光镜', 65, {angle: -45}),
@@ -148,11 +162,13 @@
     thickness: [0.01, 500], n: [1, 4], lines: [1, 10000], order: [-10, 10],
     r1: [-1e6, 1e6], r2: [-1e6, 1e6], k1: [-100, 100], k2: [-100, 100],
     a41: [-1, 1], a42: [-1, 1], scatterAngle: [0, 180], scatterSamples: [3, 17], scatterG: [0, .98],
-    mieDiameter: [.05, 4], mieIndex: [1, 4], wedge: [-89, 89]
+    mieDiameter: [.05, 4], mieIndex: [1, 4], wedge: [-89, 89], axisAngle: [-360, 360],
+    retardance: [-360, 360], referenceWavelength: [380, 780]
   };
   const sourceLimits = {
     ...commonLimits, height: [0.01, 1000], width: [0.01, 1000], spread: [0, 89],
-    wavelength: [380, 780], bandwidth: [1, 400], rays: [3, 41]
+    wavelength: [380, 780], bandwidth: [1, 400], rays: [3, 41],
+    polAngle: [-360, 360], ellipticity: [-45, 45], polDegree: [0, 1]
   };
   const names = {
     x: '位置 x', y: '位置 y', angle: '轴向角', aperture: '通光直径', outerDiameter: '外径',
@@ -160,7 +176,9 @@
     k1: '前面圆锥系数', k2: '后面圆锥系数', a41: '前面 A₄', a42: '后面 A₄',
     lines: '刻线密度', order: '衍射级次', height: '全视场物高', width: '光束全宽',
     spread: '发散半角', wavelength: '参考波长', bandwidth: '光谱全宽', rays: '采样光线数',
-    scatterAngle: '散射半角', scatterSamples: '散射采样数', wedge: '楔角'
+    scatterAngle: '散射半角', scatterSamples: '散射采样数', wedge: '楔角',
+    axisAngle: '偏振轴角', retardance: '额定延迟', referenceWavelength: '设计波长',
+    polAngle: '偏振方位角', ellipticity: '椭圆角', polDegree: '偏振度'
   };
   function checkNumbers(value, limits, keys) {
     const errors = [];
@@ -174,7 +192,9 @@
   }
   function validateSource(s) {
     if (!s || typeof s !== 'object') return ['缺少光源参数。'];
-    const errors = checkNumbers(s, sourceLimits, Object.keys(sourceLimits));
+    const sourceWithDefaults = {...sourcePolDefaults, ...s};
+    const errors = checkNumbers(sourceWithDefaults, sourceLimits, Object.keys(sourceLimits));
+    if (!Object.hasOwn(polarizations, sourceWithDefaults.polarization)) errors.push('请选择支持的光源偏振态。');
     if (!Object.hasOwn(spatial, s.type)) errors.push('请选择支持的光源类型。');
     if (!Object.hasOwn(spectra, s.spectrum)) errors.push('请选择支持的光谱。');
     if (!Number.isInteger(s.rays) || s.rays % 2 !== 1) errors.push('每束光线数应为 3 至 41 的奇数，含一条中心光线。');
@@ -199,6 +219,10 @@
     if (e.type === 'grating') {
       errors.push(...checkNumbers(e, elementLimits, ['lines', 'order']));
       if (!Number.isInteger(e.order)) errors.push('衍射级次须为整数。');
+    }
+    if (e.type === 'polarizer' || e.type === 'retarder') {
+      const keys = e.type === 'retarder' ? ['axisAngle', 'retardance', 'referenceWavelength'] : ['axisAngle'];
+      errors.push(...checkNumbers({...defaults[e.type], ...e}, elementLimits, keys));
     }
     if (e.type === 'object') {
       const error = optics.validateObject(e);
@@ -324,6 +348,19 @@
     if (s.spectrum === 'band') spectrum.append(number('bandwidth', '光谱全宽', 'nm'),
       note('在中心波长两侧均匀取五个样本，可见波段限于 380–780 nm。'));
     container.append(spectrum);
+    const mode = s.polarization ?? 'unpolarized';
+    const panel = section('光源偏振', menuField('polarization', '偏振态', polarizations));
+    if (mode !== 'unpolarized') {
+      panel.append(number('polDegree', '偏振度（0–1）', ''));
+      if (mode === 'linear' || mode === 'elliptical') {
+        panel.append(number('polAngle', '偏振方位角 ψ', '°'),
+          note('每条光线的 0° 沿子午面内的横向 p，+90° 沿垂直于画布的 s。'));
+      }
+      if (mode === 'elliptical') panel.append(number('ellipticity', '椭圆角 χ', '°'),
+        note('χ = 0° 为线偏振，±45° 为圆偏振。χ 的正负与 V 相同。'));
+      if (mode === 'left' || mode === 'right') panel.append(note('迎着光束看，左旋为逆时针，右旋为顺时针。'));
+    }
+    container.append(panel);
   }
   function lensSurface(i, e) {
     const shape = surfaceShape(e, i), panel = node('details', 'ae-surface');
@@ -555,7 +592,7 @@
         if(mixed && model==='mie') {
           const plot=node('canvas','mie-phase-plot');
           plot.width=300;plot.height=100;plot.setAttribute('role','img');plot.setAttribute('aria-label','米氏散射角分布');
-          view.phasePlot=plot;panel.append(plot,note('角分布图取空气中入射、光源参考波长。'));
+          view.phasePlot=plot;panel.append(plot,note('角分布图以空气中的非偏振入射和光源参考波长为基准。'));
         }
         container.append(panel);
       }
@@ -563,6 +600,24 @@
         group(number('thickness','中心厚度'),number('n','常数折射率','')),number('wedge','后表面楔角','°'),
         note('图案位于前表面。楔角为 0° 时两面平行，折射率在所有采样波长保持相同。')));
       if(e.interaction==='reflect')container.append(note('亮格按局部法线镜面反射。可将法线设为 −45°，使水平入射光向上折转。'));
+    }
+    if (e.type === 'polarizer' || e.type === 'retarder') {
+      const plate = e.type === 'retarder';
+      const panel = section(plate ? '波片设置' : '偏振片设置',
+        number('axisAngle', plate ? '快轴角' : '透光轴角', '°'),
+        note('正向入射时，0° 沿横向 p，+90° 沿 s。此理想薄片对斜入射光沿用设定轴角，背向穿越时轴角反号。'));
+      if (plate) {
+        const shortcuts = node('div', 'ae-actions');
+        for (const [caption, delay] of [['四分之一波片', 90], ['半波片', 180]]) {
+          const button = action(caption, 'set-delay', '设置额定延迟为 ' + delay + '°');
+          button.dataset.delay = delay;
+          shortcuts.append(button);
+        }
+        panel.append(shortcuts, group(number('retardance', '额定延迟 δ', '°'),
+          number('referenceWavelength', '设计波长 λ₀', 'nm')),
+          note('δ 在设计波长 λ₀ 处给定。两轴光程差按常数处理，波长 λ 下的延迟为 δ × λ₀/λ，斜入射也采用此值。'));
+      }
+      container.append(panel);
     }
     const origin = e.type === 'lens' ? '前顶点' : e.type === 'object' ? '图案中心' : '中心位置';
     const pose = section('放置与尺寸', textField('name', '器件名称', labels[e.type], 64),
@@ -613,7 +668,8 @@
     return state.elements.find(e => e.id === state.selected) || state.source;
   }
   function newId(state, type) {
-    const prefix = {object:'o',lens: 'l', stop: 'p', screen: 's', mirror: 'm', grating: 'g'}[type];
+    const prefix = {object:'o',lens: 'l', stop: 'p', screen: 's', mirror: 'm', grating: 'g',
+      polarizer: 'pol', retarder: 'wp'}[type];
     let idx = 1;
     while (state.elements.some(e => e.id === prefix + idx)) idx++;
     return prefix + idx;
@@ -676,6 +732,8 @@
   }
   function displayedValue(item, key) {
     if (key === 'shape1' || key === 'shape2') return surfaceShape(item, key.slice(-1));
+    if (Object.hasOwn(sourcePolDefaults, key)) return item[key] ?? sourcePolDefaults[key];
+    if (item.type === 'retarder' || item.type === 'polarizer') return item[key] ?? defaults[item.type][key] ?? '';
     if (key === 'scatterModel') return item.scatterModel || 'diffuse';
     if (item.interaction === 'mixed' && Object.hasOwn(fractionNames, key)) {
       return Number((item.fractions[key] * 100).toFixed(8));
@@ -712,6 +770,7 @@
       fractions[balance] = Math.max(0, max - fractions[key]);
       updated = {...item, fractions};
     }
+    else if (key === 'polarization') updated = {...sourcePolDefaults, ...item, polarization: value};
     else if (key.startsWith('shape')) updated = changeShape(item, key, value);
     else if (key==='scatterModel') {
       updated={mieDiameter:1,mieIndex:1.59,scatterG:.8,...item,scatterModel:value};
@@ -775,6 +834,11 @@
       const b = event.target.closest('button');
       if (!b || !host.contains(b)) return;
       const state = view.state;
+      if (b.dataset.action === 'set-delay') {
+        const retardance = Number(b.dataset.delay);
+        validatePatch(view, {elements: state.elements.map(e => e.id === state.selected ? {...e, retardance} : e)});
+        return;
+      }
       if (b.dataset.select) {
         view.commit({selected: b.dataset.select});
         revealSelection(view);
@@ -838,7 +902,7 @@
     const copyButton=view.actions.querySelector('[data-action="copy"]');
     copyButton.disabled=item.type==='object';
     copyButton.title=item.type==='object'?'一个实验可使用一个图案物体。':'复制当前器件';
-    const formKey = JSON.stringify([selected, item.type, item.interaction, item.scatterModel, !!item.channels, item.spectrum, item.material,
+    const formKey = JSON.stringify([selected, item.type, item.interaction, item.scatterModel, !!item.channels, item.spectrum, item.polarization, item.material,
       item.type === 'lens' && surfaceShape(item, 1), item.type === 'lens' && surfaceShape(item, 2)]);
     if (formKey !== view.formKey) {
       view.form.replaceChildren(); view.actions.hidden = isSource; view.patternEditor=null; view.fractionEditor=null;view.phasePlot=null;

@@ -193,6 +193,12 @@
 .awi-energy-escape { background: #65a5bd; }
 .awi-energy-block { background: #bc8768; }
 .awi-energy-pending { background: #ae78a0; }
+.awi-energy-polarizer { background: #a77a45; }
+.awi-pol-state { display: flex; align-items: center; gap: 22px; flex-wrap: wrap; margin: 14px 0; }
+.awi-pol-figure { margin: 0; width: 150px; padding: 7px 10px; background: #f3f7f2; border: 1px solid #d9e4d9; border-radius: 8px; }
+.awi-pol-figure svg { display: block; width: 100%; }
+.awi-pol-figure figcaption { text-align: center; font-size: 13px; color: #275c4a; }
+.awi-pol-state .awi-equations { flex: 1 1 210px; }
 .awi-energy-key { display: inline-block; width: 7px; height: 7px; margin-right: 5px; border-radius: 50%; }
 .awi-energy-account table { width: 100%; border-collapse: collapse; margin: 6px 0; font-size: 11px; }
 .awi-energy-account th { font-weight: 400; text-align: left; }

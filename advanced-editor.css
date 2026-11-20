@@ -86,6 +86,7 @@
 .ae-precise-field input { width:47px; border:1px solid #cbd8cb; border-radius:3px; padding:4px; color:#384d3d; font-variant-numeric:tabular-nums; }
 .ae-precise-field:nth-child(2) input { width:60px; }
 .ae-symbol.ae-grating, .ae-symbol.ae-mirror { color: #796e9b; background: #f2eef6; border-color: #e5deec; }
+.ae-symbol.ae-polarizer, .ae-symbol.ae-retarder { color: #2c6480; background: #eaf4f7; border-color: #cce1ea; }
 .ae-row-text { min-width: 0; }
 .ae-row-text b, .ae-row-text small { display: block; }
 .ae-row-text b { font-size: 12px; font-weight: 560; overflow-wrap: anywhere; }

@@ -3,9 +3,9 @@
 (function (root) {
   'use strict';
   const views = new WeakMap();
-  const tabs = { object: '物体成像', ray: '逐面追迹', cardinal: '近轴基准', detector: '探测屏', aberration: '像差与色散' };
+  const tabs = { object: '物体成像', ray: '逐面追迹', polarization: '偏振分析', cardinal: '近轴基准', detector: '探测屏', aberration: '像差与色散' };
   const objectModes = {scatter:'透射散射', reflect:'镜面反射', refract:'双界面折射', mixed:'混合物体'};
-  const kinds = { scatter:'散射', absorb:'吸收', refract: '折射', reflect: '反射', tir: '全内反射', diffract: '衍射', blocked: '遮挡', pass: '通过', detect: '探测', evanescent: '无传播级次' };
+  const kinds = { polarize:'线偏振片', retard:'相位延迟', scatter:'散射', absorb:'吸收', refract: '折射', reflect: '反射', tir: '全内反射', diffract: '衍射', blocked: '遮挡', pass: '通过', detect: '探测', evanescent: '无传播级次' };
   const statuses = { escaped: '已离开系统', blocked: '已遮挡', detected: '已探测', evanescent: '无传播级次', limit: '到达追迹上限' };
   const surfaceNames = { S1: '前面 S1', S2: '后面 S2', rim: '实体边缘', plane: '器件面' };
   const finite = Number.isFinite;
@@ -74,6 +74,28 @@
   function empty(message) { return '<p class="awi-empty">'+esc(message)+'</p>'; }
   function nameOf(scene,id) { return scene.elements.find(e=>e.id===id)?.name || String(id); }
   function vector(v) { return v ? '('+num(v.x,5)+', '+num(v.y,5)+')' : '—'; }
+  function polarizationLabel(state) {
+    const {type, degree} = root.Polarization.describe(state);
+    if (type === 'unpolarized') return '非偏振';
+    const prefix = degree < 1-1e-7 ? '部分偏振 · ' : '';
+    const rotation = state[2] > 0 ? '左旋' : '右旋';
+    return prefix + ({linear:'线偏振', circular:rotation+'圆偏振', elliptical:rotation+'椭圆偏振'})[type];
+  }
+  function rayPolarization(state) {
+    return polarizationLabel(state) + '　(q, u, v) = (' + state.map(x=>num(x,3)).join(', ') + ')';
+  }
+  function segmentPolarizationTable(scene,ray) {
+    const rows=[];
+    let start='光源';
+    for(let i=0;i<ray.points.length-1;i++){
+      const event=ray.events[i];
+      const end=event ? nameOf(scene,event.elementId)+(event.surface==='plane'?'':' · '+(surfaceNames[event.surface]||event.surface)) : '逸出系统';
+      const state=event?.stokesIn??ray.stokes;
+      rows.push([(i+1)+'. '+start+' → '+end,polarizationLabel(state),state.map(x=>num(x,4)).join(', '),fluxNumber(event?.weightIn??ray.weight)]);
+      start=end;
+    }
+    return details('逐段偏振',table(['传播段','偏振态','(q, u, v) · 局部 p/s','相对功率'],rows));
+  }
   function fieldLabel(scene,field) {
     return scene.source.type==='field' ? '物点 '+num(field)+' mm' : scene.source.type==='collimated' ? '平行束' : '点光源';
   }
@@ -121,6 +143,14 @@
       ['单位法线 N（朝向入射侧）',vector(event.normal)]
     ];
     if (event.outDirection) rows.push(['出射单位向量 o',vector(event.outDirection)]);
+    if (event.stokesIn) rows.push(['入射偏振 · 光线自身 p/s 基底',rayPolarization(event.stokesIn)]);
+    if (event.stokesOut) rows.push(['出射偏振 · 光线自身 p/s 基底',rayPolarization(event.stokesOut)]);
+    if (event.kind==='polarize') rows.push(
+      ['透光轴相对 p 的角度 α',angle(event.axisAngle)],
+      ['透过份额 ½(1 + q cos 2α + u sin 2α)',share(event.weightOut,event.weightIn)],
+      ['偏振片吸收的相对功率',fluxNumber(event.polarizerLoss)]);
+    if (event.kind==='retard') rows.push(['快轴相对 p 的角度',angle(event.axisAngle)],
+      ['本谱线相对延迟 δ = δ₀λ₀/λ',angle(event.retardance)]);
     if (lens?.type==='object') {
       rows.push(['物面作用',objectModes[lens.interaction]]);
       if (Number.isInteger(event.patternIndex)) {
@@ -135,14 +165,14 @@
         rows.push(['此界面入射 / 吸收',fluxNumber(incident)+' / '+fluxNumber(absorbed)]);
         rows.push(['同一交点的散射 / 镜面反射 / 透射', [scattered,reflected,transmitted].map(value=>fluxNumber(value)).join(' / ')]);
       }
-      if(finite(event.fresnel))rows.push(['非偏振界面功率反射率 F',share(event.fresnel,1)]);
+      if(finite(event.fresnel))rows.push(['当前入射偏振的界面功率反射率 F',share(event.fresnel,1)]);
       if(event.mieMatched)rows.push(['粒子与入射介质折射率匹配','球散射功率为零，本格的散射份额并入透明介质通道，经界面反射和透射分配。']);
       if(event.kind==='scatter')rows.push(...scatteringRows(lens,event));
       if((lens.interaction==='refract' || lens.interaction==='mixed') && event.surface==='S2'){
         rows.push(['后面交点的局部轴向坐标 x = t + h tan β',scalar(lens.thickness+event.localY*Math.tan(lens.wedge*Math.PI/180))+'　·　β = '+angle(lens.wedge)]);
       }
     }
-    if(scene.elements.some(e=>e.type==='object') && finite(event.weightIn)){
+    if(finite(event.weightIn)){
       if(event.kind==='detect')rows.push(['屏面接收的相对权重',num(event.weightIn,6)]);
       else rows.push(['交点入射权重 → 当前路径出射权重',num(event.weightIn,6)+' → '+num(event.weightOut,6)]);
     }
@@ -208,12 +238,14 @@
     }
     const lastEvent=events.at(-1);
     let statusText=statuses[ray.status] || ray.status;
+    if(lastEvent?.kind==='polarize' && ray.weight===0)statusText='偏振片已消光';
     if(lastEvent?.kind==='absorb'||(ray.status==='blocked' && lastEvent?.patternValue===0))statusText='图案已吸收';
     if(ray.limitReason==='branch')statusText='分支余量计入未追完';
     let html = '<div class="awi-toolbar">'+rayPicker+'<span class="awi-state">'+esc(statusText)+'</span></div>';
     if(scene.elements.some(e=>e.type==='object') && Number.isInteger(ray.sourceId)){
       html+='<p class="awi-note awi-path-source">源样本 #'+(ray.sourceId+1)+' · '+num(ray.wavelength,2)+' nm · '+esc(fieldLabel(scene,ray.field))+' · 终点权重 '+num(ray.weight,6)+'</p>';
     }
+    html+=segmentPolarizationTable(scene,ray);
     if (!events.length) return html+empty('这条光线未命中任何器件。检查光源方向和器件位置，或选择另一条光线。');
     html += '<div class="awi-step-layout"><div class="awi-steps" aria-label="光线经过的界面">';
     events.forEach((event,i)=>{
@@ -346,7 +378,7 @@
     const {selectedHits,field,wavelength,waveValues}=context;
     const stats=statistics(selectedHits);
     const paths=(result.rays||[]).filter(ray=>ray.field===field && (wavelength==='all'||ray.wavelength===wavelength));
-    const weighted=scene.elements.some(e=>e.type==='object');
+    const weighted=scene.elements.some(e=>e.type==='object'||e.type==='polarizer');
     const launched=weighted ? new Set(paths.map(ray=>ray.sourceId)).size : paths.length;
     let html=detectorPickers(scene,context);
     const countMetric=weighted
@@ -363,6 +395,50 @@
     ]));
   }
   function binSeries(count) { return Array(count).fill(0); }
+
+  function polarizationFigure(state) {
+    const {type,azimuth,ellipticity} = root.Polarization.describe(state);
+    const axis = type==='circular' ? 0 : azimuth;
+    const minor = 40*Math.tan(Math.abs(ellipticity)*Math.PI/180);
+    let shape;
+    if (type==='unpolarized') {
+      shape = '<circle r="16" fill="none" stroke-dasharray="2 4"/><path d="M-8 0H8 M0 -8V8 M-6 -6L6 6 M-6 6L6 -6"/>';
+    } else if (type==='linear') {
+      shape = '<path d="M-40 0H40"/>';
+    } else {
+      const sign = state[2]>0 ? -1 : 1;
+      shape = '<ellipse rx="40" ry="'+minor+'"/><path d="M36 '+(-4*sign)+' L40 0 L44 '+(-4*sign)+'"/>';
+    }
+    return '<figure class="awi-pol-figure"><svg viewBox="0 0 128 108" role="img" aria-label="'+esc(polarizationLabel(state))+'">'+
+      '<path d="M6 54H116 M64 8V102" stroke="#b6c8bc"/><g fill="#526d60" font-size="11"><text x="117" y="57">p</text><text x="69" y="14">s</text></g>'+
+      '<g transform="translate(64 54) rotate('+(-axis)+')" stroke="#176d59" stroke-width="2.3" fill="none">'+shape+'</g></svg>'+
+      '<figcaption>'+esc(polarizationLabel(state))+'</figcaption></figure>';
+  }
+
+  function polarizationPanel({scene,result},view) {
+    const context = detectorContext(scene,result,view);
+    if (!context.detector) return empty('把探测屏放进光路，即可测量偏振。逐面追迹中也可查看单条光线的偏振。');
+    const {selectedHits,wavelength,field} = context;
+    const received = summedWeight(selectedHits);
+    const emitted = new Set(result.rays.filter(ray=>ray.field===field &&
+      (wavelength==='all'||ray.wavelength===wavelength)).map(ray=>ray.sourceId)).size;
+    const state = root.Polarization.average(selectedHits);
+    let html = detectorPickers(scene,context);
+    const ledger = wavelength==='all' ? result.energy : result.energyByWavelength.find(row=>row.wavelength===wavelength);
+    html += '<div class="awi-metrics">'+metric('屏上相对功率 I',fluxNumber(received),'当前场点与谱线')+
+      metric('接收 / 发射',share(received,emitted),'同一筛选范围')+
+      metric('偏振片总吸收',fluxNumber(ledger.polarizerLoss),'当前谱线 · 全部场点')+'</div>';
+    if (!state) return html+empty('屏上功率为零，偏振态未定义。可在逐面追迹中查看消光或截光发生的位置。');
+    const {degree,type,azimuth,ellipticity} = root.Polarization.describe(state);
+    const hasAzimuth = type==='linear'||type==='elliptical';
+    html += '<div class="awi-pol-state">'+polarizationFigure(state)+formulaRows([
+      ['归一化 Stokes (q, u, v)', '('+state.map(x=>num(x,5)).join(', ')+')'],
+      ['偏振度 DoP',share(degree,1)],
+      ['偏振分量主轴方位角 ψ',hasAzimuth ? unit(azimuth,'°',2) : '无唯一方位'],
+      ['偏振分量椭圆角 χ',type==='unpolarized' ? '—' : unit(ellipticity,'°',2)]
+    ])+'</div>';
+    return html+'<p class="awi-note">屏面先把各光线的局部 p/s 对齐到屏的横轴与面外轴，再按到达功率叠加 Stokes。图形显示偏振分量的形状，大小已归一。v 为正表示从屏的正向端迎光观察时逆时针旋转。</p>';
+  }
   function binIndex(position,width,count) {
     return Math.min(count-1,Math.max(0,Math.floor((position/width+.5)*count)));
   }
@@ -413,19 +489,20 @@
       {key:'escape',label:'离开系统',value:system.escaped},
       {key:'block',label:'截光／无传播级次',value:system.blocked},
       {key:'absorb',label:'图案吸收',value:system.absorbed},
+      {key:'polarizer',label:'偏振片吸收',value:system.polarizerLoss},
       {key:'pending',label:'未追完',value:system.unresolved}
     ];
     const localNote=(object.interaction==='mixed'?'S1 镜面反射包含界面反射，透射分量沿折射方向传播。':'')+'返回图案面的光在每次到达时重新计入。';
     const scatterModel=object.scatterModel ?? 'diffuse';
     const angularLaw={
-      mie:'非偏振光照射均匀透明球，P(θ) ∝ (|S₁(θ)|² + |S₂(θ)|²) / 2。粒径、波长与相对折射率决定角分布。',
+      mie:'按入射 p、s 的功率份额分别加权 |S₂|²、|S₁|²；由两复振幅的相对相位计算散射分支偏振。',
       hg:'P(θ) ∝ (1 − g²) / (1 + g² − 2g cos θ)^(3/2)。g 控制前向集中程度。',
       diffuse:'P(δ) ∝ cos δ，δ 从入射侧法线量起。只有正入射时，这个法线方向才对应 180° 后向。'
     }[scatterModel];
     const angularNote=scatterModel==='diffuse'?'散射分支返回入射侧。':'θ 从光的入射传播方向量起，θ = 0° 表示向前。';
     const model=object.interaction==='mixed'?details('物面分光与散射公式',formulaRows([
       ['每格 S + R + T + A = 1','S 为散射，R 为直接镜面反射，T 为透明介质，余量 A = 1 − S − R − T 归入吸收。W 为此次入射功率。'],
-      ['非偏振界面反射率  F = (Rₛ + Rₚ) / 2','F 由两侧折射率和入射角决定。全内反射时 F = 1。'],
+      ['界面反射率 F = [(1 + q)Rₚ + (1 − q)Rₛ] / 2','q 为局部入射归一化 Stokes 分量。全内反射时 F = 1。'],
       ['散射  Wₛ = WS','S 由物格给定，各方向分支的功率合计为 Wₛ。'],
       [scatterModels[scatterModel],angularLaw+' '+angularNote],
       ['角度采样','在指定半角的子午截面内，对 P 按平面角积分并归一。粒子浓度、散射截面与传播厚度不参与本格 S 的计算。'],
@@ -661,7 +738,7 @@
       ['二维范围','场曲、弧矢与子午像散的完整评价需要三维视场与光瞳采样。当前读数不包含衍射点扩散函数和辐射强度。']
     ]));
   }
-  const panels={object:objectPanel,ray:rayPanel,cardinal:cardinalPanel,detector:detectorPanel,aberration:aberrationPanel};
+  const panels={object:objectPanel,ray:rayPanel,polarization:polarizationPanel,cardinal:cardinalPanel,detector:detectorPanel,aberration:aberrationPanel};
   function drawView(host,view) {
     const opts=view.opts;
     if(!opts.result||!Array.isArray(opts.result.rays)){
@@ -736,5 +813,13 @@
       view.tab='object';drawView(host,view);
     }
   }
-  root.AdvInspector = {render,showObject};
+  function showPolarization(host) {
+    const view=views.get(host);
+    if (view) { view.tab='polarization'; drawView(host,view); }
+  }
+  function showRay(host) {
+    const view=views.get(host);
+    if (view && view.tab!=='ray') { view.tab='ray'; drawView(host,view); }
+  }
+  root.AdvInspector = {render,showObject,showPolarization,showRay};
 })(typeof globalThis === 'undefined' ? window : globalThis);

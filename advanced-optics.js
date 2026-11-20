@@ -4,9 +4,9 @@
  * Edmund Optics "All About Aspheric Lenses", MKS Diffraction Gratings Handbook.
  */
 (function (root, factory) {
-  if (typeof module === 'object' && module.exports) module.exports = factory(require('./mie-phase.js'));
-  else root.AdvancedOptics = factory(root.MiePhase);
-})(typeof globalThis === 'object' ? globalThis : this, function (phase) {
+  if (typeof module === 'object' && module.exports) module.exports = factory(require('./mie-phase.js'), require('./polarization.js'));
+  else root.AdvancedOptics = factory(root.MiePhase, root.Polarization);
+})(typeof globalThis === 'object' ? globalThis : this, function (phase, pol) {
   'use strict';
 
   const DEG = Math.PI / 180;
@@ -195,6 +195,10 @@
     if (!finite(s.x) || !finite(s.y ?? 0) || !finite(s.angle ?? 0) || !['point','field','collimated'].includes(s.type)) errors.push('光源类型或位置无效');
     if (!['mono','rgb','band'].includes(s.spectrum ?? 'mono') || !finite(s.wavelength ?? 550) || (s.wavelength ?? 550)<380 || (s.wavelength ?? 550)>780) errors.push('光谱无效，波长范围为 380–780 nm');
     if (![s.width??0,s.height??0,s.spread??0,s.bandwidth??0].every(x=>finite(x)&&x>=0) || !finite(s.rays??9)) errors.push('光源宽度、视场、角度或采样数无效');
+    if (!['unpolarized','linear','left','right','elliptical'].includes(s.polarization??'unpolarized') ||
+        !finite(s.polAngle??0) || !finite(s.ellipticity??0) || Math.abs(s.ellipticity??0)>45 ||
+        !finite(s.polDegree??1) || (s.polDegree??1)<0 || (s.polDegree??1)>1)
+      errors.push('光源偏振设置无效，椭圆率角须在 ±45° 以内，偏振度须在 0 至 1 之间');
     const ids = new Set();
     for (const e of scene.elements) {
       if (!e || ids.has(e.id) || e.id == null) { errors.push('每个器件需要独立编号'); continue; }
@@ -205,7 +209,11 @@
       else if (e.type === 'object') why = validateObject(e);
       else if (e.type === 'grating' && (!(finite(e.lines) && e.lines>0) || !Number.isInteger(e.order))) why='刻线密度必须为正、级次必须为整数';
       else if (e.type === 'stop' && e.outerDiameter!=null && (!finite(e.outerDiameter)||e.outerDiameter<e.aperture)) why='光阑外径不能小于通光口径';
-      else if (!['lens','screen','mirror','grating','stop'].includes(e.type)) why='未知器件类型';
+      else if (['polarizer','retarder'].includes(e.type) && !finite(e.axisAngle??0)) why='偏振光轴角须为有限角度';
+      else if (e.type === 'retarder' && (!finite(e.retardance??90) || !finite(e.referenceWavelength??550) ||
+          (e.referenceWavelength??550)<380 || (e.referenceWavelength??550)>780))
+        why='波片相位延迟或设计波长无效，设计波长范围为 380–780 nm';
+      else if (!['lens','screen','mirror','grating','stop','polarizer','retarder'].includes(e.type)) why='未知器件类型';
       if (why) errors.push(e.id + ' · ' + why);
       else if (e.type==='lens'||isSolidObject(e)) { const lens=prepare(e);lens.outline=outline(lens);lenses.push(lens); }
     }
@@ -363,11 +371,11 @@
   }
   // A first encounter distributes power among angular cells. At later visits
   // one deterministic quantile carries the entire scattered packet.
-  function mixedAngles(optic, n1, wavelength, u) {
+  function mixedAngles(optic, n1, wavelength, u, stokes) {
     const halfAngle=optic.scatterAngle, samples=optic.scatterSamples;
     if (optic.scatterModel==='mie') {
       const options={diameter:optic.mieDiameter,index:optic.mieIndex,medium:n1,wavelength,halfAngle,samples};
-      return u===null ? phase.sample(options) : [{offset:phase.quantile(options,u),fraction:1}];
+      return phase.scatterPolarized(options,stokes,u);
     }
     if (optic.scatterModel==='hg') {
       const options={g:optic.scatterG,halfAngle,samples};
@@ -376,24 +384,15 @@
     return u===null ? scatterLobe(halfAngle,samples) :
       [{offset:Math.asin((2*u-1)*Math.sin(halfAngle*DEG))/DEG, fraction:1}];
   }
-  // Intensity reflectance of an unpolarized dielectric interface. Ray weights
-  // track power in the beam, so its transmitted share is exactly 1-F.
-  function fresnel(d, n, n1, n2, transmitted) {
-    if (n1 === n2) return 0;
-    if (!transmitted) return 1;
-    const ci = Math.abs(dot(d, n)), ct = Math.abs(dot(transmitted, n));
-    const rs = (n1*ci - n2*ct) / (n1*ci + n2*ct);
-    const rp = (n2*ci - n1*ct) / (n2*ci + n1*ct);
-    return clamp((rs*rs + rp*rp)/2, 0, 1);
-  }
   const bareSurface = {scatter:0, reflection:0, transmission:1, absorption:0};
   const objectEnergy = () => ({incident:0, absorbed:0, scattered:0, reflected:0, transmitted:0});
-  const systemEnergy = () => ({emitted:0, absorbed:0, blocked:0, detected:0, escaped:0, unresolved:0});
-  function mixedInterface(optic, incoming, n, medium, n1, wavelength, weight, cell, u) {
+  const systemEnergy = () => ({emitted:0, absorbed:0, polarizerLoss:0, blocked:0, detected:0, escaped:0, unresolved:0});
+  function mixedInterface(optic, incoming, n, medium, n1, wavelength, weight, cell, u, stokes) {
     const nextMedium = medium === optic ? null : optic;
     const n2 = latestMedium(nextMedium, wavelength);
     const transmitted = refracted(incoming, n, n1, n2);
-    const F = fresnel(incoming, n, n1, n2, transmitted);
+    const boundary = pol.dielectric(stokes,n1,n2,Math.abs(dot(incoming,n)),transmitted && Math.abs(dot(transmitted,n)));
+    const F = boundary.reflected.fraction;
     const f = cell ?? bareSurface;
     const mieMatched = f.scatter>0 && optic.scatterModel==='mie' && Math.abs(optic.mieIndex-n1)<1e-12;
     const clear = f.transmission + (mieMatched ? f.scatter : 0);
@@ -401,29 +400,35 @@
       scattered:weight*(mieMatched ? 0 : f.scatter), reflected:weight*(f.reflection + clear*F),
       transmitted:weight*clear*(1-F)};
     const outputs = [];
-    if (energy.reflected > 0)
+    if (energy.reflected > 0) {
+      // Specular paint and the dielectric portion are independent subareas of one cell.
+      const reflectedState = pol.average([
+        {weight:f.reflection,stokes:pol.reflect(stokes)}, {weight:clear*F,stokes:boundary.reflected.stokes}
+      ]);
       outputs.push({kind:!transmitted && clear>0 ? 'tir' : 'reflect',
-        direction:reflected(incoming,n), weight:energy.reflected, medium});
+        direction:reflected(incoming,n), weight:energy.reflected, medium, stokes:reflectedState});
+    }
     if (energy.transmitted > 0)
-      outputs.push({kind:'refract', direction:transmitted, weight:energy.transmitted, medium:nextMedium});
+      outputs.push({kind:'refract', direction:transmitted, weight:energy.transmitted, medium:nextMedium, stokes:boundary.transmitted.stokes});
     if (energy.scattered > 0) {
       // Scattering is localized at the patterned surface. A particle lobe is
       // referenced to the incident propagation vector; an oblique lobe may
       // put different branches on opposite sides of the same interface.
       const axis = ['mie','hg'].includes(optic.scatterModel) ? angle(incoming) : angle(n);
-      for (const {offset, fraction} of mixedAngles(optic,n1,wavelength,u)) {
+      for (const {offset, fraction, stokes:scatteredState} of mixedAngles(optic,n1,wavelength,u,stokes)) {
         if (!(fraction>0)) continue;
         const d=direction(axis+offset), crosses=dot(d,n)<0;
         outputs.push({kind:'scatter', direction:d, weight:energy.scattered*fraction,
           medium:crosses?nextMedium:medium, scatterSide:crosses?'opposite':'incident',
-          scatterOffset:offset, scatterFraction:fraction});
+          scatterOffset:offset, scatterFraction:fraction, stokes:scatteredState??pol.unpolarized});
       }
     }
     return {energy, outputs, F, n2, mieMatched};
   }
-  function trace(seed, optics, tail, maxEvents, recordObject, pending, continuation) {
+  function trace(seed, optics, tail, maxEvents, recordObject, ledger, pending, continuation) {
     let p=continuation?.point??seed.origin, d=continuation?.direction??unit(seed.direction);
     let totalOPL=continuation?.opl??0, weight=continuation?.weight??1;
+    let stokes=continuation?.stokes??seed.sourceStokes;
     let medium=continuation ? continuation.medium : optics.find(o=>o.surfaces&&inside(p,o));
     const points=continuation?.points??[p], events=continuation?.events??[], objectHits=continuation?.objectHits??[];
     let status='limit', intercepted=0;
@@ -434,7 +439,7 @@
       const {optic,surface,point,localY,t}=closest;
       const n=dot(d,closest.normal)>0?scale(closest.normal,-1):closest.normal;
       const n1=latestMedium(medium,seed.wavelength);
-      const weightIn=weight, isObject=optic.type==='object';
+      const weightIn=weight, stokesIn=stokes, isObject=optic.type==='object';
       let patternHit=null, scatter=null;
       if (isObject && (surface==='plane' || surface==='S1')) {
         const {index,value}=patternAt(optic,localY);
@@ -446,25 +451,25 @@
         const repeated = objectHits.length>1;
         const u = repeated ? scatterVariate(seed.sourceId,continuation?.branch??0,i) : null;
         const cell = patternHit ? cellFractions(optic,patternHit.patternIndex) : null;
-        const {energy,outputs,F,n2,mieMatched} = mixedInterface(optic,d,n,medium,n1,seed.wavelength,weightIn,cell,u);
+        const {energy,outputs,F,n2,mieMatched} = mixedInterface(optic,d,n,medium,n1,seed.wavelength,weightIn,cell,u,stokes);
         if (patternHit) recordObject(optic.id,seed.wavelength,patternHit.patternIndex,energy);
         const opl=totalOPL+t*n1;
         const common={...point,elementId:optic.id,surface,localY,type:'object',interaction:'mixed',
           ...patternHit,cellFractions:cell,energy,fresnel:F,mieMatched,scatterModel:optic.scatterModel??'diffuse',
           n1,n2,normal:n,inDirection:d,inAngle:angle(d),
-          incidence:Math.acos(clamp(-dot(d,n),-1,1))/DEG,wavelength:seed.wavelength,opl,stepLength:t,weightIn};
+          incidence:Math.acos(clamp(-dot(d,n),-1,1))/DEG,wavelength:seed.wavelength,opl,stepLength:t,weightIn,stokesIn};
         if (!outputs.length) {
-          events.push({...common,kind:'absorb',outDirection:null,outAngle:null,emergence:null,weightOut:0});
+          events.push({...common,kind:'absorb',outDirection:null,outAngle:null,emergence:null,weightOut:0,stokesOut:null});
           points.push(point); totalOPL=opl; weight=0; status='blocked';
           break;
         }
         for (const [branch,output] of outputs.entries()) {
           const out=unit(output.direction);
           const event={...common,kind:output.kind,outDirection:out,outAngle:angle(out),
-            emergence:Math.acos(clamp(Math.abs(dot(out,n)),0,1))/DEG,weightOut:output.weight};
+            emergence:Math.acos(clamp(Math.abs(dot(out,n)),0,1))/DEG,weightOut:output.weight,stokesOut:output.stokes};
           if (output.kind==='scatter') Object.assign(event,{scatterOffset:output.scatterOffset,
             scatterFraction:output.scatterFraction,scatterSide:output.scatterSide,secondaryScatter:repeated});
-          pending.push({point,direction:out,medium:output.medium,weight:output.weight,opl,
+          pending.push({point,direction:out,medium:output.medium,weight:output.weight,stokes:output.stokes,opl,
             points:points.concat(point),events:events.concat(event),objectHits:objectHits.slice(),branch});
         }
         return [];
@@ -480,11 +485,33 @@
         recordObject(optic.id,seed.wavelength,patternHit.patternIndex,energy);
       }
       let n2=n1, out=d, kind='pass';
+      let plateEvent=null;
       if(weight===0||surface==='rim'||(optic.type==='stop'&&Math.abs(localY)>optic.half+EPS)){kind='blocked';out=null;status='blocked';intercepted=weight;weight=0;}
       else if(optic.type==='screen'){kind='detect';out=null;status='detected';}
-      else if(optic.type==='mirror'||(isObject&&optic.interaction==='reflect')){kind='reflect';out=reflected(d,n);}
+      else if(optic.type==='mirror'||(isObject&&optic.interaction==='reflect')){
+        kind='reflect';out=reflected(d,n);stokes=pol.reflect(stokes);
+      }
+      else if(optic.type==='polarizer'||optic.type==='retarder'){
+        // Ideal thin elements act in each ray's transverse p/s basis. A reverse
+        // traversal reverses p relative to the plate's marked in-plane axis.
+        const axisAngle = Math.sign(dot(d,optic.axis)) * (optic.axisAngle??0);
+        if (optic.type==='polarizer') {
+          kind='polarize';
+          const output=pol.polarize(stokes,axisAngle);
+          stokes=output.stokes; weight*=output.fraction;
+          plateEvent={axisAngle,polarizerLoss:weightIn-weight};
+          ledger.polarizerLoss+=plateEvent.polarizerLoss;
+          if (!weight) {out=null;status='blocked';}
+        } else {
+          kind='retard';
+          const retardance=(optic.retardance??90)*(optic.referenceWavelength??550)/seed.wavelength;
+          stokes=pol.retard(stokes,axisAngle,retardance);
+          plateEvent={axisAngle,retardance};
+        }
+      }
       else if(isObject&&optic.interaction==='scatter'){
         kind='scatter';
+        stokes=pol.unpolarized;
         const central=angle(scale(n,-1));
         if (!continuation) {
           recordLegacy(kind);
@@ -497,9 +524,9 @@
               n1,n2,normal:n,inDirection:d,outDirection:directionOut,inAngle:angle(d),outAngle:angle(directionOut),
               incidence:Math.acos(clamp(-dot(d,n),-1,1))/DEG,emergence:Math.abs(offset),
               wavelength:seed.wavelength,opl,stepLength:t,scatterOffset:offset,scatterFraction:fraction,
-              weightIn,weightOut:nextWeight};
-            return trace(seed,optics,tail,maxEvents,recordObject,pending,{point,direction:directionOut,
-              medium,weight:nextWeight,opl,points:points.concat(point),events:events.concat(event),
+              weightIn,weightOut:nextWeight,stokesIn,stokesOut:stokes};
+            return trace(seed,optics,tail,maxEvents,recordObject,ledger,pending,{point,direction:directionOut,
+              medium,weight:nextWeight,stokes,opl,points:points.concat(point),events:events.concat(event),
               objectHits:objectHits.slice(),branch});
           });
         }
@@ -520,13 +547,18 @@
         n2=latestMedium(nextMedium,seed.wavelength);
         out=refracted(d,n,n1,n2);
         if(out){kind='refract';medium=nextMedium;}
-        else{kind='tir';out=reflected(d,n);}
+        else{
+          kind='tir';out=reflected(d,n);
+          stokes=pol.dielectric(stokes,n1,n2,Math.abs(dot(d,n)),null).reflected.stokes;
+        }
       }
       recordLegacy(kind);
       if(out)out=unit(out);
       totalOPL+=t*n1;
       events.push({elementId:optic.id,type:optic.type,surface,kind,...point,localY,n1,n2,wavelength:seed.wavelength,
-        ...(isObject?{interaction:optic.interaction}:{}),...patternHit,...scatter,weightIn,weightOut:weight,
+        ...(isObject?{interaction:optic.interaction}:{}),...patternHit,...scatter,...plateEvent,weightIn,weightOut:weight,
+        ...(kind==='detect'?{forwardOnScreen:dot(d,optic.axis)>0}:{}),
+        stokesIn,stokesOut:out?stokes:null,
         normal:n,inDirection:d,outDirection:out,inAngle:angle(d),outAngle:out?angle(out):null,
         incidence:Math.acos(clamp(-dot(d,n),-1,1))/DEG,
         emergence:out?Math.acos(clamp(Math.abs(dot(out,n)),0,1))/DEG:null,
@@ -535,14 +567,14 @@
       if(!out)break;
       d=out;
     }
-    return [{...seed,direction:d,points,events,status,opl:totalOPL,weight,intercepted,objectHits}];
+    return [{...seed,direction:d,points,events,status,opl:totalOPL,weight,stokes,intercepted,objectHits}];
   }
 
   // Continue the brightest packets first. The undistributed power of every
   // stopped packet stays in the unresolved column instead of becoming loss.
-  function traceFamily(seed,optics,tail,recordObject) {
+  function traceFamily(seed,optics,tail,recordObject,ledger) {
     const pending=[];
-    const rays=trace(seed,optics,tail,64,recordObject,pending);
+    const rays=trace(seed,optics,tail,64,recordObject,ledger,pending);
     let continued=0;
     while (pending.length) {
       pending.sort((a,b)=>a.weight-b.weight);
@@ -550,13 +582,13 @@
       if (continued>=96 || next.weight<1e-8) {
         for (const branch of [...pending,next]) {
           rays.push({...seed,direction:branch.direction,points:branch.points,events:branch.events,
-            status:'limit',limitReason:'branch',opl:branch.opl,weight:branch.weight,intercepted:0,
+            status:'limit',limitReason:'branch',opl:branch.opl,weight:branch.weight,stokes:branch.stokes,intercepted:0,
             objectHits:branch.objectHits});
         }
         break;
       }
       continued++;
-      rays.push(...trace(seed,optics,tail,64,recordObject,pending,next));
+      rays.push(...trace(seed,optics,tail,64,recordObject,ledger,pending,next));
     }
     return rays;
   }
@@ -619,7 +651,8 @@
     const s=scene.source, optics=scene.elements.map(prepare), waves=wavelengths(s);
     const fields=s.type==='field'&&s.height>0?[-s.height/2,0,s.height/2]:[0];
     const {transverse}=axes(s),count=clamp(Math.round(s.rays??9),3,41);
-    const rays=[],detectors=optics.filter(o=>o.type==='screen').map(o=>({id:o.id,hits:[],weight:0,centroid:null,rms:null}));
+    const sourceStokes=pol.sourceState(s);
+    const rays=[],detectors=optics.filter(o=>o.type==='screen').map(o=>({id:o.id,hits:[],weight:0,centroid:null,rms:null,stokes:null}));
     const byId=new Map(detectors.map(d=>[d.id,d]));
     const bins=()=>({incident:Array(PATTERN_BINS).fill(0),outgoing:Array(PATTERN_BINS).fill(0),energy:objectEnergy()});
     const objects=optics.filter(o=>o.type==='object').map(o=>({id:o.id,...bins(),
@@ -645,7 +678,7 @@
       const sourceId=emittedCount++;
       const ledger=spectralLedger.get(wavelength);
       ledger.emitted++;
-      const paths=traceFamily({sourceId,origin,field,pupil,wavelength,direction:direction(rayAngle)},optics,scene.tail??800,recordObject);
+      const paths=traceFamily({sourceId,origin,field,pupil,wavelength,sourceStokes,direction:direction(rayAngle)},optics,scene.tail??800,recordObject,ledger);
       for(const ray of paths){
         ray.id=rays.length;
         rays.push(ray);
@@ -654,8 +687,11 @@
         else ledger[ray.status]+=ray.weight;
         if(ray.status==='detected'){
           const h=ray.events.at(-1);
+          // Express each incident state against the screen's marked tangent
+          // before summing beams arriving from opposite sides of the detector.
+          const screenStokes=h.forwardOnScreen ? ray.stokes : pol.reflect(ray.stokes);
           byId.get(h.elementId).hits.push({rayId:ray.id,sourceId,x:h.x,globalY:h.y,y:h.localY,wavelength,field,pupil,
-            weight:ray.weight,objectHits:ray.objectHits});
+            weight:ray.weight,stokes:ray.stokes,screenStokes,objectHits:ray.objectHits});
         }
       }
     }
@@ -664,6 +700,7 @@
       d.weight=d.hits.reduce((sum,h)=>sum+h.weight,0);
       d.centroid=d.hits.reduce((sum,h)=>sum+h.weight*h.y,0)/d.weight;
       d.rms=Math.sqrt(d.hits.reduce((sum,h)=>sum+h.weight*(h.y-d.centroid)**2,0)/d.weight);
+      d.stokes=pol.average(d.hits);
     }
     if(rays.some(r=>r.status==='limit' && r.limitReason!=='branch'))warnings.push('部分光线已达到 64 次交互上限，剩余权重计入未追完');
     const energy=systemEnergy();

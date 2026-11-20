@@ -26,6 +26,7 @@ npm start
 | 两片镜能否把物体等大倒像？ | **基础实验室**。选「双透镜 · 4f 中继系统」，逐片查看成像。 | 光线矩阵、每一级的像坐标与累计放大率。 |
 | 厚度、曲面与材料如何影响聚焦？ | **进阶工作站**。编辑平面、球面、圆锥面或非球面，选择玻璃与光谱，跟随逐面追迹。 | 交点、局部法线、折射率、光程、主面、有效焦距（EFL）、后焦距（BFL）及屏上光斑。 |
 | 光经过多个器件后去了哪里？ | **进阶工作站**。组合透镜、光阑、平面镜、透射光栅和探测屏，调整位置与倾角。 | 每次折转或截光的位置、不同波长的落点，以及各屏接收的相对通量。 |
+| 为什么两片偏振片会消光？波片怎样产生圆偏振？ | **进阶工作站**。选择双偏振片或四分之一波片预设，调整透光轴、快轴角和光源波长。 | 光段偏振符号、逐面偏振变换，以及探测屏的相对功率、归一化 Stokes 向量与偏振度。 |
 | 物体图案怎样影响屏上的明暗？ | **进阶工作站**。在「物体与图案」中绘制材质，调整散射模型、粒径、角窗或曝光。 | 33 格物面份额、逐分支光路、一维屏面能量分布与系统能量收支。 |
 
 进阶版的空间分布与光谱可独立设置。平行束、发散点光源和多视场物点都可配合单色、三条谱线或宽谱采样。拖动器件时，磁吸可以对齐网格、局部光轴和相邻镜片的焦面，按住 `Alt` 可临时关闭磁吸。
@@ -42,21 +43,23 @@ npm start
 
 **近轴与曲面追迹。** 基础版用空气中的同轴薄透镜和 ABCD 矩阵求理想共轭像。进阶版在二维子午截面内寻找真实曲面交点，按局部法线应用 Snell 定律，并对 N-BK7、F2 与熔融石英计算材料色散。EFL 从后主面量到后焦点，BFL 从最后一面的顶点量到后焦点。有限物距的像面还取决于物体位置。对于倾斜或折叠光路，应沿实际光路检查单条光线和屏面交点。
 
-**物体与能量。** 混合物体正面的每个图案格可同时绘制散射份额 S、镜面反射份额 R、透明介质份额 T，总和不超过 1。余下的 1 − S − R − T 为吸收，空白格在正面全吸收。设介质界面的非偏振菲涅耳反射率为 F，图案面一次相遇分配给散射、反射、折射透过的份额依次为 S、R + TF、T(1 − F)。背面为裸介质界面，可再次产生反射。普通镜片采用理想无反射损耗的折射模型。系统账本按探测、逸出、吸收、截光和未追完的分支汇总权重。
+**物体与能量。** 混合物体正面的每个图案格可同时绘制散射份额 S、镜面反射份额 R、透明介质份额 T，总和不超过 1。余下的 1 − S − R − T 为吸收，空白格在正面全吸收。设介质界面对当前入射偏振的菲涅耳功率反射率为 F，图案面一次相遇分配给散射、反射、折射透过的份额依次为 S、R + TF、T(1 − F)。背面为裸介质界面，可再次产生反射。普通镜片采用理想无反射损耗的折射模型。系统账本按探测、逸出、图案吸收、偏振片吸收、截光和未追完的分支汇总权重。
 
-**散射和像质的适用范围。** 米氏模型计算均匀透明球的角强度。米氏和 Henyey–Greenstein 模型都以入射方向为 0°，入射侧漫反射则以该侧表面法线为中心。米氏角强度在所选二维角窗内积分并归一，散射总量由物面份额指定。屏上 RMS 是加权射线落点的一维几何散布。完整三维场曲、衍射光斑、偏振态、相干干涉、薄膜镀层和光栅各级效率均在当前模型范围之外。
+**散射和像质的适用范围。** 米氏模型计算均匀透明球的角强度。米氏和 Henyey–Greenstein 模型都以入射方向为 0°，入射侧漫反射则以该侧表面法线为中心。米氏角强度在所选二维角窗内积分并归一，散射总量由物面份额指定。屏上 RMS 是加权射线落点的一维几何散布。完整三维场曲、衍射光斑、晶体双折射分束、光线间相干干涉、薄膜镀层和光栅各级效率均在当前模型范围之外。
 
-16 章实验手册提供更完整的操作、公式、单位、数值练习和模型说明，可搜索「4f」「散射」「曝光」等关键词。公式来源与延伸阅读见手册各章，例如 [Edmund Optics 的焦距定义](https://www.edmundoptics.com/knowledge-center/application-notes/optics/understanding-optical-lens-geometries/)、[PBRT 的介质界面模型](https://pbr-book.org/4ed/Reflection_Models/Dielectric_BSDF) 和 [miepython 的数值验证](https://miepython.readthedocs.io/en/latest/07_algorithm.html#test-to-match-bohren-s-sample-calculation)。
+**偏振控制。** “马吕斯定律 · 双偏振片”以非偏振光照明，检偏片轴角取 0°、45°、90° 时，屏上分别收到源功率的 50%、25%、0%。“四分之一波片 · 线偏振转圆偏振”在设计波长 550 nm 将 +45° 线偏振转成迎光观察时逆时针的圆偏振。可在“偏振分析”筛选探测屏、场点和谱线，对照光段符号查看归一化 Stokes 读数。理想波片的相对延迟按波长反比缩放；米氏分支按两个复振幅计算偏振，HG 与漫反射分支采用完全退偏近似。
+
+17 章实验手册提供更完整的操作、公式、单位、数值练习和模型说明，可搜索「4f」「散射」「曝光」等关键词。公式来源与延伸阅读见手册各章，例如 [Edmund Optics 的焦距定义](https://www.edmundoptics.com/knowledge-center/application-notes/optics/understanding-optical-lens-geometries/)、[PBRT 的介质界面模型](https://pbr-book.org/4ed/Reflection_Models/Dielectric_BSDF) 和 [miepython 的数值验证](https://miepython.readthedocs.io/en/latest/07_algorithm.html#test-to-match-bohren-s-sample-calculation)。
 
 ## 测试与代码结构
 
-在项目目录执行 `npm test` 即可用 Node.js 内置测试运行器检查成像公式、真实曲面交点、色散、全反射、光栅方向、物体图案、能量守恒和米氏角分布。前端使用原生 JavaScript、HTML、CSS 和 Canvas，修改文件后刷新页面即可查看效果。
+在项目目录执行 `npm test` 即可用 Node.js 内置测试运行器检查成像公式、真实曲面交点、色散、全反射、光栅方向、物体图案、能量守恒、米氏角分布与偏振变换。前端使用原生 JavaScript、HTML、CSS 和 Canvas，修改文件后刷新页面即可查看效果。
 
 | 代码 | 用途 |
 | --- | --- |
 | [index.html](index.html)、[app.js](app.js)、[optics.js](optics.js) | 基础实验室、画布交互、薄透镜与矩阵计算 |
 | [advanced.html](advanced.html)、[advanced.js](advanced.js)、[advanced-optics.js](advanced-optics.js) | 进阶场景、预设、曲面追迹与能量汇总 |
 | [advanced-editor.js](advanced-editor.js)、[advanced-canvas.js](advanced-canvas.js)、[advanced-inspector.js](advanced-inspector.js) | 器件与图案编辑器、光路画布、逐面演算与探测统计 |
-| [mie-phase.js](mie-phase.js) | 球形颗粒米氏角强度、散射角采样 |
+| [mie-phase.js](mie-phase.js)、[polarization.js](polarization.js) | 均匀球散射角分布、偏振变换、Stokes 统计 |
 | [manual.html](manual.html)、[manual.js](manual.js)、[manual-basic.js](manual-basic.js)、[manual-advanced.js](manual-advanced.js) | 独立手册与两套界面共用的课程 |
 | [server.cjs](server.cjs)、[package.json](package.json)、`*.test.cjs` | 本地服务器、运行命令和物理回归测试 |

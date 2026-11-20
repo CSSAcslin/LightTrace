@@ -76,6 +76,18 @@
       }
       if(e.type==='mirror'){line(local(e,0,-a),local(e,0,a),light?'#9b773e':'#e0c57e',3);const step=Math.max(7/scale,2*a/40);for(let y=-a;y<a;y+=step)line(local(e,0,y),local(e,4/scale,y+4/scale),accent,1);}
       if(e.type==='grating'){line(local(e,0,-a),local(e,0,a),light?'#87588c':'#cda1d8',3,[2,2]);}
+      if(e.type==='polarizer'||e.type==='retarder'){
+        // The drawn width identifies the ideal sheet. Its traced surface is x=0.
+        const tint=e.type==='polarizer'?(light?'#186d90':'#7bd8f8'):(light?'#815a98':'#d8b1ec');
+        line(local(e,0,-a),local(e,0,a),tint,sel?3:2);
+        if(e.type==='polarizer'){
+          const step=Math.max(8/scale,2*a/36);
+          for(let y=-a+step/2;y<a;y+=step)line(local(e,-3/scale,y),local(e,3/scale,y),tint);
+        }else{
+          line(local(e,3/scale,-a),local(e,3/scale,a),tint,1);
+          for(const y of [-a,a])line(local(e,0,y),local(e,3/scale,y),tint);
+        }
+      }
       if(e.type==='screen'){line(local(e,0,-a),local(e,0,a),light?'#63783f':'#c3d799',2,[4,3]);}
       if(e.type==='stop'){const out=(e.outerDiameter||Math.max(100,e.aperture+40))/2;for(const s of [-1,1]){line(local(e,0,s*a),local(e,0,s*out),light?'#874735':'#cd9276',4);line(local(e,-2/scale,s*a),local(e,2/scale,s*a),accent,2);}}
     }
@@ -83,16 +95,92 @@
       line(vec(lo.x,0),vec(hi.x,0),light?'#6c8e752f':'#aad1b033',1,[4,6]);c.font='9px Consolas,monospace';c.fillStyle=light?'#627668':'#6e8b7c';c.textAlign='center';let tick=s;while(tick*scale<60)tick*=2;for(let x=Math.ceil(lo.x/tick)*tick;x<=hi.x;x+=tick){const p=P(vec(x,0));if(p.x>18&&p.x<w-18)c.fillText(String(Number(x.toFixed(2))),p.x,h-24);}
     }
     function marks(e,m,prefix,light){if(!m?.valid)return;const tone=light?'#4f7958':'#a0be8f';for(const [key,sym] of [['frontFocalX','F'],['backFocalX','F′'],['h1X','H'],['h2X','H′']]){if(!num(m[key]))continue;const x=m[key],p=local(e,x,0),len=(sym.startsWith('H')?10:6)/scale;line(local(e,x,-len),local(e,x,len),tone,1,[2,2]);if(sym.startsWith('F'))circle(p,2.5,tone);label(prefix+sym,p,tone,'below',true);}}
+    function visibleMidpoint(a,b){
+      // Clip the segment before placing its mark; escaped rays often extend off screen.
+      let from=0,to=1;
+      for(const [start,end,min,max] of [[a.x,b.x,12,w-12],[a.y,b.y,44,h-38]]){
+        if(start===end){if(start<min||start>max)return null;continue;}
+        const t0=(min-start)/(end-start),t1=(max-start)/(end-start);
+        from=Math.max(from,Math.min(t0,t1));to=Math.min(to,Math.max(t0,t1));
+      }
+      if(to<=from)return null;
+      const t=(from+to)/2;
+      return vec(a.x+(b.x-a.x)*t,a.y+(b.y-a.y)*t);
+    }
+    function polarizationGlyph(x,y,stokes,light,selected){
+      const {type,degree,azimuth,ellipticity}=Polarization.describe(stokes);
+      c.save();c.translate(x,y);
+      c.fillStyle=light?'#fffef8':'#112d30';
+      c.strokeStyle=selected?(light?'#895e17':'#edcf8a'):(light?'#46727c':'#a0c5ca');
+      c.lineWidth=1;
+      if(degree>1e-6&&degree<1-1e-6)c.setLineDash([2,2]);
+      c.beginPath();c.roundRect(-11,-9,22,18,4);c.fill();c.stroke();c.setLineDash([]);
+      c.lineWidth=1.5;c.lineCap='round';c.beginPath();
+      if(type==='unpolarized'){
+        for(let i=0;i<4;i++){
+          const dx=5.7*Math.cos(i*Math.PI/4),dy=5.7*Math.sin(i*Math.PI/4);
+          c.moveTo(-dx,-dy);c.lineTo(dx,dy);
+        }
+      }else if(type==='linear'){
+        const dx=7*Math.cos(azimuth*rad),dy=-7*Math.sin(azimuth*rad);
+        c.moveTo(-dx,-dy);c.lineTo(dx,dy);
+      }else{
+        c.rotate(-(azimuth||0)*rad);
+        const major=6.4,minor=Math.max(1,major*Math.tan(Math.abs(ellipticity)*rad));
+        c.ellipse(0,0,major,minor,0,0,2*Math.PI);
+        // At the right extremity an upward arrow means counterclockwise.
+        const turn=stokes[2]>0?-1:1;
+        c.moveTo(major-2.2,-turn*1.5);c.lineTo(major,turn*1.5);c.lineTo(major+1.7,-turn*1.5);
+      }
+      c.stroke();c.restore();
+    }
+    function polarizationMarks(rays,highlight,stride,light){
+      const seen=new WeakSet(),boxes=labelBoxes.map(b=>({...b,h:15}));
+      function markRay(ray,selected){
+        for(let j=0;j<ray.points.length-1;j++){
+          const end=ray.points[j+1],event=ray.events[j];
+          if(seen.has(end)||(event?.weightIn??ray.weight)<=0)continue;
+          seen.add(end);
+          const a=P(ray.points[j]),b=P(end),center=visibleMidpoint(a,b);
+          if(!center)continue;
+          const length=dist(a,b);
+          if(!length||(!selected&&length<24))continue;
+          const nx=(a.y-b.y)/length,ny=(b.x-a.x)/length;
+          // Closely spaced surfaces can still show the selected path using a leader.
+          // For the rest of a dense bundle keep only marks with clear space.
+          const offsets=selected?[0,18,-18,36,-36,54,-54]:[0];
+          let badge=selected?center:null;
+          for(const offset of offsets){
+            const x=center.x+nx*offset,y=center.y+ny*offset;
+            if(x<12||x>w-12||y<42||y>h-35)continue;
+            const pad=selected?2:9;
+            if(boxes.some(b=>x+11+pad>b.x&&x-11-pad<b.x+b.w&&y+9+pad>b.y&&y-9-pad<b.y+b.h))continue;
+            badge=vec(x,y);
+            break;
+          }
+          if(!badge)continue;
+          if(badge.x!==center.x||badge.y!==center.y){
+            c.beginPath();c.strokeStyle=light?'#916f3b':'#bea86c';c.lineWidth=.8;
+            c.moveTo(center.x,center.y);c.lineTo(badge.x,badge.y);c.stroke();
+          }
+          polarizationGlyph(badge.x,badge.y,event?.stokesIn??ray.stokes,light,selected);
+          boxes.push({x:badge.x-11,y:badge.y-9,w:22,h:18});
+        }
+      }
+      if(highlight)markRay(highlight,true);
+      for(let i=0;i<rays.length;i+=stride)if(rays[i]!==highlight)markRay(rays[i],false);
+    }
     function draw(){if(!scene||!result)return;const v=scene.canvas,light=v.theme==='light',fg=light?'#305c46':'#b2ceb7';labelBoxes=[];handle=null;c.clearRect(0,0,w,h);c.fillStyle=light?'#f2f4ea':v.theme==='navy'?'#172336':'#102829';c.fillRect(0,0,w,h);grid(light);
       const es=scene.elements,source=scene.source;
       if(v.axis){for(const e of es.filter(e=>e.type==='lens')){const ext=Math.max(35/scale,Math.min(120,2*e.aperture));line(local(e,-ext,0),local(e,ext+e.thickness,0),light?'#5b94846b':'#78b99b6b',1,[7,4]);}for(const g of groups.filter(g=>g.ok)){const e=g.first,b=g.last;line(local(e,-20/scale,0),local(b,b.thickness+20/scale,0),light?'#7e8149':'#c5bb85',1,[10,6,2,6]);}}
       es.forEach(e=>optic(e,light));
       const rays=result.rays||[],highlight=rays[rayIndex],specimen=es.find(e=>e.type==='object');
+      const weighted=!!specimen||es.some(e=>e.type==='polarizer');
       // Draw a shared incident trunk once, then its individual outgoing branches.
       // All numerical profiles use the weights themselves; opacity is only a visual cue.
       const stride=specimen?Math.max(1,Math.ceil(rays.length/850)):1,drawnEndpoints=new WeakSet();
       for(let i=0;i<rays.length;i+=stride){const r=rays[i];if(r===highlight)continue;const color=v.spectral?spectral(r.wavelength):light?'#5e826c':'#a4ceb1';
-        if(!specimen){c.globalAlpha=v.opacity/100;loop(r.points,null,color,1.05);continue;}
+        if(!weighted){c.globalAlpha=v.opacity/100;loop(r.points,null,color,1.05);continue;}
         for(let j=1;j<r.points.length;j++){
           // Children share the actual prefix points, including after a second split.
           const end=r.points[j];
@@ -115,13 +203,14 @@
         }}
       }
       if(highlight){loop(highlight.points,null,light?'#8f6726':'#fae8b4',1.7);for(const e of highlight.events)circle(e,2,light?'#92713f':'#ddc78f');const event=highlight.events[stepIndex];if(event){const p=vec(event.x,event.y),n=event.normal;if(n){line(plus(p,vec(-n.x*23/scale,-n.y*23/scale)),plus(p,vec(n.x*23/scale,n.y*23/scale)),light?'#973e68':'#f1adcb',1.2,[3,3]);}circle(p,5,null,light?'#9e476b':'#efaac7');label('● '+(stepIndex+1)+' / '+event.surface,p,light?'#874267':'#edc5d7','above',true);}}
-      for(const d of result.detectors||[]){for(const hit of d.hits){c.globalAlpha=specimen?clamp(Math.sqrt(hit.weight??1),0,1):1;if(num(hit.x)&&num(hit.globalY))circle(vec(hit.x,hit.globalY),2.2,v.spectral?spectral(hit.wavelength):fg);}}c.globalAlpha=1;
+      for(const d of result.detectors||[]){for(const hit of d.hits){c.globalAlpha=weighted?clamp(Math.sqrt(hit.weight??1),0,1):1;if(num(hit.x)&&num(hit.globalY))circle(vec(hit.x,hit.globalY),2.2,v.spectral?spectral(hit.wavelength):fg);}}c.globalAlpha=1;
       const sy=source.type==='collimated'?source.width/2:source.type==='field'?source.height/2:0;line(local(source,0,-sy),local(source,0,sy),light?'#956727':'#e4c27a',2);circle(source,3,light?'#ac7d3d':'#f2ce84');label('光源',local(source,0,Math.max(sy,5/scale)),light?'#8e692a':'#e5cb92','above',true);
       for(const e of es){let y=e.type==='stop'?(e.outerDiameter||100)/2:e.aperture/2;label(e.name||e.id,local(e,0,y),light?'#405d48':fg,'above',true);}
       if(v.cardinal){for(const m of result.lensMetrics||[]){const e=es.find(o=>o.id===m.id);if(e&&(e.id===scene.selected||v.allMarks))marks(e,m,'',light);}for(const g of groups)if(g.ok&&(v.allMarks||g.lenses.some(e=>e.id===scene.selected)))marks(g.first,g.metrics,'组',light);if(relay?.confocal){line(local({...relay.A,angle:relay.angle},0,-25/scale),local({...relay.A,angle:relay.angle},0,25/scale),light?'#71783c':'#c1cb86',1,[3,3]);label(relay.complete?'4f · 共焦面':'共焦面',relay.A,light?'#687438':'#c3d18e','above',true);}}
       const sel=scene.selected==='source'?source:es.find(e=>e.id===scene.selected);if(sel&&mode==='select'){circle(sel,4,null,light?'#477765':'#9dd2bb');handle=local(sel,27/scale,-13/scale);line(sel,handle,light?'#678774':'#94bf9f',1,[3,3]);circle(handle,4.5,light?'#f0f4e7':'#264a3d','#92bd9d');}
       if(measurement.length){const a=measurement[0],b=measurement[1]||(mode==='ruler'&&pointer?W(pointer):null);circle(a,3,'#e4ad6c');if(b){circle(b,3,'#e4ad6c');line(a,b,'#dfac6b',1.5,[5,3]);label(fixed(dist(a,b),2)+' mm  ·  '+fixed(Math.atan2(b.y-a.y,b.x-a.x)/rad,1)+'°',vec((a.x+b.x)/2,(a.y+b.y)/2),light?'#94672f':'#e5bd88','above',true);}}
       if(snapNote&&drag){label(snapNote,W(vec(drag.last.x,drag.last.y-12)),light?'#4e785e':'#b9d9b6','above');}
+      if(v.polarization)polarizationMarks(rays,highlight,stride,light);
     }
     function eventPoint(e){const r=canvas.getBoundingClientRect();return vec(e.clientX-r.left,e.clientY-r.top);}
     function objectAt(p){if(dist(p,P(scene.source))<12)return 'source';let best=Infinity,id=null;for(const e of scene.elements){const a=(e.type==='stop'?e.outerDiameter||100:e.aperture)/2;const d=e.type==='lens'?Math.min(...[...edge(e,1),...edge(e,2)].map(q=>dist(P(q),p)),segmentDistance(p,P(local(e,e.thickness/2,-a)),P(local(e,e.thickness/2,a)))):solidSpecimen(e)?Math.min(...specimenEdges(e).map((q,i,vs)=>segmentDistance(p,P(q),P(vs[(i+1)%vs.length])))):segmentDistance(p,P(local(e,0,-a)),P(local(e,0,a)));if(d<best&&d<11){best=d;id=e.id;}}return id;}

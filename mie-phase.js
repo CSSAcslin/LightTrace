@@ -43,7 +43,7 @@
     return terms;
   }
 
-  function angularPower(terms, theta) {
+  function angularMueller(terms, theta) {
     const mu = Math.cos(theta * rad);
     let pPrev = 0, p = 1;
     let s1r = 0, s1i = 0, s2r = 0, s2i = 0;
@@ -54,7 +54,11 @@
       s2r += ar*tau + br*p; s2i += ai*tau + bi*p;
       [pPrev, p] = [p, ((2*n + 1) * mu * p - (n + 1) * pPrev) / n];
     }
-    return (s1r*s1r + s1i*s1i + s2r*s2r + s2i*s2i) / 2;
+    const pPower = s2r*s2r + s2i*s2i, sPower = s1r*s1r + s1i*s1i;
+    // Jones diag(S2,S1) in the moving (p,s) basis, with exp(-iωt).
+    // U+iV = 2 conj(Ep) Es, so its multiplier is conj(S2) S1.
+    return [(pPower+sPower)/2, (pPower-sPower)/2,
+      s2r*s1r + s2i*s1i, s2r*s1i - s2i*s1r];
   }
 
   function distribution({diameter, index, medium, wavelength, halfAngle}) {
@@ -63,27 +67,33 @@
     const x = Math.PI * diameter * medium * 1000 / wavelength;
     const terms = sphereCoefficients(x, index / medium);
     const count = Math.max(360, Math.ceil(20 * x * halfAngle * rad));
-    return tabulate(key, halfAngle, count, theta => index === medium ? 0 : angularPower(terms, theta));
+    const rows = Array.from({length:count+1}, (_,i) =>
+      index === medium ? [0,0,0,0] : angularMueller(terms, i*halfAngle/count));
+    const matrix = [0,1,2,3].map(j => tabulate(halfAngle, count, (_,i) => rows[i][j]));
+    return remember(key, {...matrix[0], matrix});
   }
 
   function hgDistribution({g, halfAngle}) {
     const key = 'HG/' + g + '/' + halfAngle;
     if (cache.has(key)) return cache.get(key);
     const count = Math.max(360, Math.ceil(16 * halfAngle * rad / (1-g)));
-    return tabulate(key, halfAngle, count, theta => {
+    return remember(key, tabulate(halfAngle, count, theta => {
       const denominator = (1-g)**2 + 4*g*Math.sin(theta*rad/2)**2;
       return (1-g*g) / denominator**1.5;
-    });
+    }));
   }
 
-  function tabulate(key, halfAngle, count, intensity) {
+  function tabulate(halfAngle, count, intensity) {
     const step = halfAngle / count;
     const values = new Float64Array(count + 1), integral = new Float64Array(count + 1);
     for (let i = 0; i <= count; ++i) {
-      values[i] = intensity(i * step);
+      values[i] = intensity(i * step, i);
       if (i) integral[i] = integral[i-1] + (values[i-1] + values[i]) * step / 2;
     }
-    const law = {values, integral, step, halfAngle, samplesByCount:new Map()};
+    return {values, integral, step, halfAngle, samplesByCount:new Map()};
+  }
+
+  function remember(key, law) {
     if (cache.size >= 32) cache.delete(cache.keys().next().value);
     cache.set(key, law);
     return law;
@@ -128,6 +138,40 @@
     return bins;
   }
 
+  // Sum Stokes powers across each angular bin. On repeat visits, the
+  // existing single-quantile sampler instead represents one resolved angle.
+  function scatterPolarized(options, [q,u,v], quantileValue=null) {
+    const base = distribution(options);
+    if (!base.integral.at(-1)) return [];
+    const matrix = base.matrix;
+    let law = base;
+    if (q !== 0) {
+      if (base.lastQ !== q) {
+        base.lastQ = q;
+        base.polarizedLaw = tabulate(base.halfAngle, base.values.length-1, (_,i) =>
+          Math.max(0, base.values[i] + q*matrix[1].values[i]));
+      }
+      law = base.polarizedLaw;
+    }
+    const bins = quantileValue === null ? sample(law, options.samples)
+      : [{offset:quantile(law, quantileValue), fraction:1}];
+    return bins.map(({offset,fraction},i) => {
+      const [a,b,c,d] = matrix.map(component => {
+        if (quantileValue === null) {
+          const left = base.halfAngle*(2*i/options.samples-1);
+          const right = base.halfAngle*(2*(i+1)/options.samples-1);
+          return integralAt(component,right) - integralAt(component,left);
+        }
+        const pos = Math.abs(offset)/base.step;
+        const j = Math.min(Math.floor(pos), base.values.length-2);
+        return component.values[j] + (pos-j)*(component.values[j+1]-component.values[j]);
+      });
+      const intensity = a+b*q;
+      return {offset,fraction,stokes:intensity>0
+        ? [(b+a*q)/intensity,(c*u-d*v)/intensity,(d*u+c*v)/intensity] : [0,0,0]};
+    });
+  }
+
   function draw(canvas, options) {
     if (!canvas) return;
     const ctx = canvas.getContext('2d'), width = canvas.width, height = canvas.height;
@@ -149,7 +193,7 @@
       ctx.textAlign=align; ctx.fillText(label,x,height-5);
     });
   }
-  return {distribution, draw,
+  return {distribution, draw, scatterPolarized,
     sample: options => sample(distribution(options), options.samples),
     sampleHG: options => sample(hgDistribution(options), options.samples),
     quantile: (options,u) => quantile(distribution(options),u),

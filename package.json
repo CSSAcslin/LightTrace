@@ -2,11 +2,11 @@
   "name": "lighttrace",
   "version": "1.0.0",
   "private": true,
-  "description": "交互式光学实验室，支持薄透镜成像、二维曲面光线追迹、散射与能量分析。",
+  "description": "交互式光学实验室，支持薄透镜成像、二维曲面光线追迹、偏振、散射与能量分析。",
   "repository": {
     "type": "git",
     "url": "https://github.com/CSSAcslin/LightTrace.git"
   },
   "keywords": ["optics", "ray-tracing", "geometric-optics", "mie-scattering", "optics-education"],
-  "scripts": { "start": "node server.cjs", "test": "node --test optics.test.cjs advanced-optics.test.cjs object-imaging.test.cjs energy-optics.test.cjs mie-phase.test.cjs" }
+  "scripts": { "start": "node server.cjs", "test": "node --test optics.test.cjs advanced-optics.test.cjs object-imaging.test.cjs energy-optics.test.cjs mie-phase.test.cjs polarization.test.cjs" }
 }
