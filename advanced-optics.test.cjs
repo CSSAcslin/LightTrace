@@ -21,6 +21,38 @@ test('glass dispersion reproduces catalogue d-line index and F/C separation',()=
   near(O.indexAt('SILICA',587.5618),1.45846,.00001);
   near(O.indexAt('F2',486.1327)-O.indexAt('F2',656.2725),.017050,.000003);
 });
+test('signed image-space focal lengths round-trip for both lens surfaces and dispersive glass',()=>{
+  for(const [radius,n1,n2,focus] of [[60,1,1.5,180],[-60,1.5,1,120],[-60,1,1.5,-180],[60,1.5,1,-120]]){
+    near(O.surfaceFocalLength(radius,n1,n2),focus);
+    near(O.radiusFromSurfaceFocus(focus,n1,n2),radius);
+  }
+  const blue=O.indexAt('F2',486.1327), red=O.indexAt('F2',656.2725);
+  const radius=O.radiusFromSurfaceFocus(150,1,blue);
+  near(O.surfaceFocalLength(radius,1,blue),150);
+  assert.ok(O.surfaceFocalLength(radius,1,red)>150);
+});
+test('plane or index-matched surfaces have zero power and invalid focal requests are rejected',()=>{
+  assert.equal(O.surfaceFocalLength(0,1,1.5),Infinity);
+  assert.equal(O.surfaceFocalLength(-120,1,1),Infinity);
+  assert.equal(O.radiusFromSurfaceFocus(Infinity,1,1.5),0);
+  assert.equal(O.radiusFromSurfaceFocus(-Infinity,1.5,1),0);
+  assert.ok(Number.isNaN(O.radiusFromSurfaceFocus(100,1,1)));
+  assert.ok(Number.isNaN(O.radiusFromSurfaceFocus(0,1,1.5)));
+  for(const [invalid,target] of [[NaN,120],[0,Infinity],[-1,120],[Infinity,120]]){
+    assert.ok(Number.isNaN(O.radiusFromSurfaceFocus(target,invalid,1)));
+    assert.ok(Number.isNaN(O.surfaceFocalLength(30,1,invalid)));
+  }
+});
+test('surface designs keep distinct vertex and principal-plane focal lengths on the local lens axis',()=>{
+  const designed={...lens,material:'CUSTOM',n:1.5,x:20,y:10,angle:30,thickness:12,
+    r1:O.radiusFromSurfaceFocus(180,1,1.5),r2:O.radiusFromSurfaceFocus(120,1.5,1)};
+  const local=O.lensParaxial(designed);
+  const power=2/120-(12/1.5)/120**2;
+  near(local.efl,1/power);
+  near(local.bfl,(1-(12/1.5)/120)/power);
+  assert.deepEqual(local,run([designed]).lensMetrics[0]);
+  assert.ok(O.lensParaxial(lens,486.1327).efl<O.lensParaxial(lens,656.2725).efl);
+});
 test('plane parallel plate obeys Snell and accumulates OPL in each medium',()=>{
   const plate={...lens,aperture:120,thickness:10,material:'CUSTOM',n:1.5,r1:0,r2:0};
   const ray=run([plate,screen],{x:-10,angle:10,width:0}).rays[0];

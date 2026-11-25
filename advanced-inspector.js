@@ -283,7 +283,14 @@
       ]));
     }
     const locals = result.lensMetrics || [];
-    if(locals.length) html += '<h4 class="awi-subtitle">各镜片的近轴基准</h4><p class="awi-note">波长 '+num(locals[0].wavelength??scene.source.wavelength)+' nm。每片沿自己的局部轴量取，前顶点为 0。</p>'+table(['镜片','EFL / mm','BFL / mm','H / mm','H′ / mm'],locals.map(l=>[nameOf(scene,l.id),num(l.efl),num(l.bfl),num(l.h1X),num(l.h2X)]));
+    if (locals.length) {
+      const metrics = ref===locals[0].wavelength ? locals : scene.elements
+        .filter(e=>e.type==='lens').map(e=>root.AdvancedOptics.lensParaxial(e,ref));
+      html += '<h4 class="awi-subtitle">各镜片的近轴基准</h4><p class="awi-note">波长 '+num(ref)+' nm。每片沿局部光轴量取。FFL 从前顶点量起，BFL 从后顶点量起，H 与 H′ 的坐标以前顶点为零。</p>'+
+        table(['镜片','EFL / mm','FFL / mm','BFL / mm','H / mm','H′ / mm'],metrics.map(l=>[
+          nameOf(scene,l.id),l.valid && l.efl===null?'∞':num(l.efl),num(l.frontFocalX),num(l.bfl),num(l.h1X),num(l.h2X)
+        ]));
+    }
     return html;
   }
   function byChoice(rows,value) {

@@ -34,7 +34,7 @@ globalThis.OpticsManualAdvanced = [
     id: 'a-surfaces',
     title: '曲面怎样折光：厚度、材料与逐面演算',
     part: '进阶工作站',
-    summary: '从 Snell 定律进入球面、圆锥面与非球面，读懂每个界面的数值。',
+    summary: '按曲率半径或表面像方焦距设置镜形，沿每条光线检查 Snell 折射。',
     html: `
       <p>薄透镜只记录“一次折弯”；厚透镜需要算出光线在哪里碰到前表面、在玻璃中走多远、又在哪里碰到后表面。曲面决定命中处的法线，法线和折射率共同决定折射方向。它解释了为什么两片焦距相近的镜片，边缘光线仍可能表现不同。</p>
       <h3>先分清方向角与入射角</h3>
@@ -44,6 +44,18 @@ globalThis.OpticsManualAdvanced = [
       <p>选择厚透镜，展开“前表面 S₁”“后表面 S₂”。<strong>R &gt; 0 表示曲率中心位于该面沿局部光轴的正向</strong>，不是“一切凸面都填正数”。常见双凸镜可用 R₁ = +75 mm、R₂ = −75 mm。改变镜片整体角度会旋转这套局部坐标，曲率符号不随之翻转。平面请直接选择“平面”；本模型内部用零曲率表示它。</p>
       <div class="manual-equation">z(h) = c h² / [1 + √(1 − (1 + k)c²h²)] + A₄h⁴，c = 1/R</div>
       <p>z 是相对顶点的轴向矢高，h 是局部横向高度，二者为 mm；k 无量纲，A₄ 单位为 mm⁻³。“球面”对应 k = 0；“圆锥面”可调 k，k = −1 为抛物面；“偶次非球面”额外提供四阶项。A₄ 数字虽小，在大口径处也可能产生很大改形。根号无实数解、两面相交或厚度不足都是无效几何，先修正参数再谈成像。<a href="https://www.edmundoptics.com/knowledge-center/application-notes/optics/all-about-aspheric-lenses/" target="_blank" rel="noopener noreferrer">参考：Edmund Optics 的非球面公式</a>。</p>
+      <h3>用前、后表面的焦距设定镜形</h3>
+      <p>要理解单个表面的<strong>像方焦距 f′</strong>，可以设想平行于局部光轴的近轴光只经过这一个折射面。若折射光在出射侧会聚，f′ 等于顶点到会聚点的距离，取正值。若折射光发散，则把光线反向延长到交点，f′ 取负值。</p>
+      <div class="manual-equation">像方焦距 f′ = n₂R / (n₂ − n₁)<br>换算曲率半径 R = f′(n₂ − n₁) / n₂</div>
+      <p>按 S₁ → S₂ 的设计方向，前表面从空气进入玻璃，取 n₁ = 1、n₂ = n。后表面从玻璃进入空气，取 n₁ = n、n₂ = 1。R 与 f′ 均用 mm。编辑器按光源参考波长取材料折射率并换算半径。以后调整材料或波长，工作站会根据已有镜形重新计算焦距。<a href="https://openstax.org/books/university-physics-volume-3/pages/2-3-images-formed-by-refraction" target="_blank" rel="noopener noreferrer">OpenStax 的单折射面像方焦距推导</a>。</p>
+      <p>分别填写“前表面像方焦距 f′₁”和“后表面像方焦距 f′₂”，按回车或移出输入框应用。输入 ∞ 或 inf 可将顶点曲率设为零，偶次非球面的四阶系数仍会影响边缘形状。需要整面平直时，在该面的面型中选“平面”。</p>
+      <details><summary>两个会聚面为什么分别填 +150 和 +100 mm？</summary>
+        <ol>
+          <li>载入“宽谱单透镜”，选中“物镜 L1”。将通光直径设为 20 mm、中心厚度设为 5 mm，玻璃材料选“自定义折射率”，取 n = 1.50。两面都选球面。</li>
+          <li>在前表面 S₁ 填像方焦距 +150 mm，在后表面 S₂ 填 +100 mm。检查半径，依次应为 +50 mm、−50 mm。相同的半径大小配上不同的出射介质，两面的像方焦距也就不同。</li>
+          <li>在“单片近轴焦距”核对 EFL ≈ 50.847 mm、FFL ≈ −49.153 mm、BFL ≈ +49.153 mm。镜片前顶点在 x = 80 mm，后顶点在 x = 85 mm，要在屏上接收近轴平行光的焦点，可将屏设在 x ≈ 134.153 mm。边缘光会因球差而落在焦点附近。</li>
+        </ol>
+      </details>
       <h3>材料与一条光线的计算账本</h3>
       <p>“玻璃材料”提供 N-BK7、F2、熔融石英和自定义折射率。前三者按 Sellmeier 关系计算色散：</p>
       <div class="manual-equation">n²(λ) = 1 + Σ Bⱼλ² / (λ² − Cⱼ)</div>
@@ -59,11 +71,13 @@ globalThis.OpticsManualAdvanced = [
     summary: '区分 EFL、BFL 与有限物距像面，用厚透镜预设理解 4f 中继。',
     html: `
       <p>“把屏放在焦距处”只对特定情况成立。轴上平行光会聚于后焦点；有限距离的物体通常在另一个共轭像面成像。厚透镜又多了一层区别：焦距从主平面量起，而尺子常从镜片后顶点量起。</p>
+      <p>选中一片厚透镜，在左侧“单片近轴焦距”可读取这片镜在光源参考波长下的 EFL、FFL 和 BFL。需要比较镜组或查看其他谱线时，打开画布下方的“光学分析 → 近轴基准”，选择“参考波长”。上方是整个系统的读数，下方“各镜片的近轴基准”按片列出结果。</p>
       <div class="manual-table-wrap"><table><thead><tr><th>标记</th><th>意义</th></tr></thead><tbody>
         <tr><td>F、F′</td><td>前、后焦点；相应焦平面垂直于局部光轴。</td></tr>
         <tr><td>H、H′</td><td>前、后主平面，一阶等效折射的参考面；可能位于镜体之外。</td></tr>
         <tr><td>EFL</td><td>有效焦距；空气中从后主平面 H′ 到后焦点 F′ 的有符号距离。</td></tr>
-        <tr><td>BFL</td><td>后焦距；最后一个表面顶点到后焦点的有符号距离。</td></tr>
+        <tr><td>FFL</td><td>前焦截距，从第一个表面顶点到前焦点 F。沿局部光轴正向量取为正，F 在第一面入射侧时 FFL 为负。</td></tr>
+        <tr><td>BFL</td><td>后焦截距，从最后一个表面顶点到后焦点 F′ 的有符号距离。</td></tr>
       </tbody></table></div>
       <p>例如后顶点 x = 100 mm、后主平面 x = 97 mm、后焦点 x = 150 mm，则 EFL = 53 mm，BFL = 50 mm。有限物距下，物距 s 从 H 量，像距 s′ 从 H′ 量；对空气中的近轴系统仍可用 1/s + 1/s′ = 1/f、m = −s′/s。<a href="https://www.edmundoptics.com/knowledge-center/application-notes/optics/understanding-optical-lens-geometries/" target="_blank" rel="noopener noreferrer">参考：Edmund Optics 的 EFL、BFL 和主面定义</a>。</p>
       <h3>近轴矩阵为什么能给出这些数？</h3>

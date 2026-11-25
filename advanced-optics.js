@@ -37,6 +37,21 @@
     return Math.sqrt(1 + B.reduce((sum, b, i) => sum + b * lambda2 / (lambda2 - C[i]), 0));
   }
 
+  // Image-space focal length measured from a surface vertex along the local
+  // optical axis. In the scene format R=0 means zero vertex curvature.
+  const positiveIndex = n => finite(n) && n > 0;
+  function surfaceFocalLength(radius, nBefore, nAfter) {
+    if (!finite(radius) || !positiveIndex(nBefore) || !positiveIndex(nAfter)) return NaN;
+    if (radius === 0 || nBefore === nAfter) return Infinity;
+    return radius / ((nAfter - nBefore) / nAfter);
+  }
+  function radiusFromSurfaceFocus(focus, nBefore, nAfter) {
+    if (!positiveIndex(nBefore) || !positiveIndex(nAfter)) return NaN;
+    if (focus === Infinity || focus === -Infinity) return 0;
+    if (!finite(focus) || focus === 0 || nBefore === nAfter) return NaN;
+    return focus * ((nAfter - nBefore) / nAfter);
+  }
+
   function sag(y, radius = 0, k = 0, a4 = 0) {
     if (radius === 0) return a4 * y ** 4;
     const radicand = 1 - (1 + k) * (y / radius) ** 2;
@@ -637,6 +652,10 @@
     return {valid:true,reason:'',matrix:m,efl,bfl,frontFocalX,backFocalX,h1X:power?frontFocalX+efl:null,
       h2X:power?backFocalX-efl:null,imageX,magnification,firstX,lastX,wavelength};
   }
+  function lensParaxial(lens, wavelength=550) {
+    const localLens = {...lens, x:0, y:0, angle:0};
+    return {id:lens.id, ...paraxial({source:{type:'collimated'}, elements:[localLens]}, wavelength)};
+  }
   function wavelengths(s) {
     if(s.spectrum==='rgb')return [486.1327,546.074,656.2725];
     const center=s.wavelength??550;
@@ -707,11 +726,9 @@
     for (const row of energyByWavelength)
       for (const key of Object.keys(energy)) energy[key]+=row[key];
     const reference=s.wavelength??550;
-    const lensMetrics=scene.elements.filter(e=>e.type==='lens').map(e=>({id:e.id,...paraxial({
-      source:{type:'collimated'},elements:[{...e,x:0,y:0,angle:0}]
-    },reference)}));
+    const lensMetrics=scene.elements.filter(e=>e.type==='lens').map(e=>lensParaxial(e,reference));
     return {warnings,rays,wavelengths:waves,paraxial:paraxial(scene,reference),lensMetrics,detectors,objects,emittedCount,energy,energyByWavelength,
       byWavelength:waves.map(wavelength=>({...paraxial(scene,wavelength),wavelength}))};
   }
-  return {materials,indexAt,sag,validateLens,validateObject,cellFractions,patternAt,validateScene,simulate,paraxial};
+  return {materials,indexAt,surfaceFocalLength,radiusFromSurfaceFocus,lensParaxial,sag,validateLens,validateObject,cellFractions,patternAt,validateScene,simulate,paraxial};
 });

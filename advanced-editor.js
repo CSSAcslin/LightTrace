@@ -367,12 +367,34 @@
     panel.open = true;
     panel.append(node('summary', '', i === 1 ? '前表面 S₁' : '后表面 S₂'));
     const content = node('div', 'ae-surface-fields');
-    content.append(menuField('shape' + i, '曲面类型', shapes));
+    const focusLabel = i === 1 ? '前表面像方焦距 f′₁' : '后表面像方焦距 f′₂';
+    const focus = textField('focus' + i, focusLabel + ' (mm)', '正负焦距或 ∞', 32);
+    content.append(focus);
     if (shape !== 'plane') content.append(numberField('r' + i, '曲率半径 R', 'mm', elementLimits));
+    content.append(menuField('shape' + i, '曲面类型', shapes));
     if (shape === 'conic' || shape === 'asphere') content.append(numberField('k' + i, '圆锥系数 k', '', elementLimits));
     if (shape === 'asphere') content.append(numberField('a4' + i, '四阶系数 A₄', 'mm⁻³', elementLimits));
     panel.append(content);
     return panel;
+  }
+  function lensFocusSummary(view) {
+    const grid = node('dl', 'ae-focal-readings');
+    const values = ['有效焦距 EFL', '前焦截距 FFL', '后焦截距 BFL'].map(caption => {
+      const cell = node('div'), value = node('dd');
+      cell.append(node('dt', '', caption), value);
+      grid.append(cell);
+      return value;
+    });
+    const wavelengthLabel = node('p', 'ae-focal-reference');
+    view.syncFocusSummary = (metric, wavelength) => {
+      wavelengthLabel.textContent = '参考波长 ' + wavelength + ' nm · 单位 mm';
+      const front = Number.isFinite(metric?.frontFocalX) ? metric.frontFocalX - metric.firstX : null;
+      [metric?.efl, front, metric?.bfl].forEach((f, i) => {
+        values[i].textContent = Number.isFinite(f) ? String(Number(f.toPrecision(6))) : metric?.valid ? '∞' : '—';
+      });
+    };
+    return section('单片近轴焦距', wavelengthLabel, grid,
+      note('EFL 从像方主面量起。FFL 和 BFL 分别从前、后顶点量到对应焦点，沿镜片局部光轴正向为正。'));
   }
   function materialChannels(obj) {
     if (obj.channels) return obj.channels;
@@ -624,14 +646,18 @@
       group(number('x', origin + ' x'), number('y', origin + ' y')),
       group(number('angle', e.type === 'lens' ? '光轴角' : '法线角', '°'),
         number('aperture', e.type === 'screen' ? '接收宽度' : e.type === 'mirror' ? '有效镜宽' : e.type==='object' ? '图案全宽' : '通光直径')));
-    container.append(pose);
     if (e.type === 'lens') {
       pose.append(textField('group', '所属镜组', '留空为独立镜片', 24));
       const body = section('镜体', group(menuField('material', '玻璃材料', materials), number('thickness', '中心厚度')));
       if (e.material === 'CUSTOM') body.append(number('n', '常数折射率 n', ''), note('该材料在所有采样波长使用相同折射率。'));
-      container.append(body, lensSurface(1, e), lensSurface(2, e),
-        note('R > 0 表示曲率中心在该表面沿局部光轴的正向。圆锥系数 k = 0 对应球面，k = −1 对应抛物面。'));
-    } else if (e.type === 'stop') {
+      container.append(lensFocusSummary(view), body,
+        note('在下方输入单个表面的像方焦距，按回车或移出输入框换算半径。正值使近轴平行光会聚，负值使其发散。输入 ∞ 或 inf 可将顶点曲率设为零。'),
+        lensSurface(1, e), lensSurface(2, e),
+        note('R > 0 表示曲率中心在该表面沿局部光轴的正向。圆锥系数 k = 0 对应球面，k = −1 对应抛物面。'), pose);
+      return;
+    }
+    container.append(pose);
+    if (e.type === 'stop') {
       pose.append(number('outerDiameter', '不透明光阑外径'),
         note('内孔和外径之外均可通光，两者之间遮光。'));
     } else if (e.type === 'grating') {
@@ -730,7 +756,15 @@
     result[a] = shape === 'asphere' ? e[a] || 0 : 0;
     return result;
   }
-  function displayedValue(item, key) {
+  function surfaceIndices(item, key, wavelength) {
+    const n = optics.indexAt(item.material, wavelength, item.n);
+    return key === 'focus1' ? [1, n] : [n, 1];
+  }
+  function displayedValue(item, key, wavelength) {
+    if (key === 'focus1' || key === 'focus2') {
+      const f = optics.surfaceFocalLength(item['r' + key.slice(-1)], ...surfaceIndices(item, key, wavelength));
+      return Number.isFinite(f) ? String(Number(f.toPrecision(12))) : '∞';
+    }
     if (key === 'shape1' || key === 'shape2') return surfaceShape(item, key.slice(-1));
     if (Object.hasOwn(sourcePolDefaults, key)) return item[key] ?? sourcePolDefaults[key];
     if (item.type === 'retarder' || item.type === 'polarizer') return item[key] ?? defaults[item.type][key] ?? '';
@@ -743,7 +777,8 @@
   function applyInput(view, input, final) {
     const key = input.dataset.field;
     if (!key) return;
-    const item = selectedObject(view.state), original = displayedValue(item, key);
+    const item = selectedObject(view.state), wavelength = view.state.source.wavelength;
+    const original = displayedValue(item, key, wavelength);
     let value = input.value;
     if (input.type === 'number') {
       if (value.trim() === '' || !Number.isFinite(input.valueAsNumber)) {
@@ -754,7 +789,24 @@
     }
     if (value === original) { setMessage(view, ''); return; }
     let updated;
-    if (item.interaction === 'mixed' && Object.hasOwn(fractionNames, key)) {
+    if (key === 'focus1' || key === 'focus2') {
+      const raw = value.trim().replace(/^−/, '-');
+      const infinite = /^[+-]?(?:∞|inf(?:inity)?)$/i.test(raw);
+      const f = infinite ? Infinity : Number(raw);
+      const media = surfaceIndices(item, key, wavelength);
+      const radius = optics.radiusFromSurfaceFocus(f, ...media);
+      const decimal = /^[+-]?(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?$/i.test(raw);
+      if (!Number.isFinite(radius) || (!infinite && (!decimal || !Number.isFinite(f) || radius === 0))) {
+        setMessage(view, media[0] === media[1] ? '界面两侧折射率相同，表面焦距只能为 ∞。' : '请输入非零的有限焦距（mm），或输入 ∞ 表示零顶点曲率。');
+        input.value = original;
+        return;
+      }
+      if (infinite && original === '∞') { input.value = original; return; }
+      const i = key.slice(-1), shape = surfaceShape(item, i);
+      if (radius === 0 && shape !== 'asphere') updated = changeShape(item, 'shape' + i, 'plane');
+      else updated = {...item, ['r' + i]: radius, ['shape' + i]: shape === 'plane' ? 'sphere' : shape};
+    }
+    else if (item.interaction === 'mixed' && Object.hasOwn(fractionNames, key)) {
       const balance = view.balanceChannel;
       if (key === balance) return;
       const fractions = {...item.fractions, [key]:value / 100};
@@ -861,11 +913,15 @@
     host.addEventListener('input', event => {
       if (event.target.type === 'number') applyInput(view, event.target, false);
     });
-    host.addEventListener('change', event => applyInput(view, event.target, true));
+    host.addEventListener('change', event => {
+      if (!['focus1','focus2'].includes(event.target.dataset.field)) applyInput(view, event.target, true);
+    });
     host.addEventListener('focusout', event => {
       const input = event.target;
-      if (input.dataset.field && input.type === 'number') {
-        input.value = displayedValue(selectedObject(view.state), input.dataset.field);
+      if (['focus1','focus2'].includes(input.dataset.field)) {
+        applyInput(view, input, true);
+      } else if (input.dataset.field && input.type === 'number') {
+        input.value = displayedValue(selectedObject(view.state), input.dataset.field, view.state.source.wavelength);
         input.removeAttribute('aria-invalid');
       }
     });
@@ -874,13 +930,13 @@
       if (!field.dataset.field) return;
       if (event.key === 'Enter') { event.preventDefault(); field.blur(); }
       if (event.key === 'Escape') {
-        field.value = displayedValue(selectedObject(view.state), field.dataset.field);
+        field.value = displayedValue(selectedObject(view.state), field.dataset.field, view.state.source.wavelength);
         field.removeAttribute('aria-invalid'); setMessage(view, ''); field.blur();
       }
     });
     return view;
   }
-  function render(host, state, commit) {
+  function render(host, state, commit, result) {
     let view = views.get(host);
     if (!view) { view = createView(host); views.set(host, view); }
     view.state = state; view.commit = commit;
@@ -905,17 +961,21 @@
     const formKey = JSON.stringify([selected, item.type, item.interaction, item.scatterModel, !!item.channels, item.spectrum, item.polarization, item.material,
       item.type === 'lens' && surfaceShape(item, 1), item.type === 'lens' && surfaceShape(item, 2)]);
     if (formKey !== view.formKey) {
-      view.form.replaceChildren(); view.actions.hidden = isSource; view.patternEditor=null; view.fractionEditor=null;view.phasePlot=null;
+      view.form.replaceChildren(); view.actions.hidden = isSource; view.patternEditor=null; view.fractionEditor=null;view.phasePlot=null;view.syncFocusSummary=null;
       if (isSource) sourceFields(view.form, item); else elementFields(view.form, item, view);
       setMessage(view, ''); view.formKey = formKey;
     }
     view.formTitle.textContent = isSource ? '光源设置' : listTitle(item);
+    if (view.syncFocusSummary) {
+      const metric = result?.lensMetrics?.find(m => m.id === item.id) ?? optics.lensParaxial(item, state.source.wavelength);
+      view.syncFocusSummary(metric, state.source.wavelength);
+    }
     if(view.patternEditor)view.patternEditor.sync(item);
     if(view.fractionEditor)view.fractionEditor.sync(item);
     if(view.phasePlot)window.MiePhase?.draw(view.phasePlot,{diameter:item.mieDiameter,index:item.mieIndex,
       medium:1,wavelength:state.source.wavelength,halfAngle:item.scatterAngle,samples:item.scatterSamples});
     for (const input of view.form.querySelectorAll('[data-field]')) {
-      const value = displayedValue(item, input.dataset.field);
+      const value = displayedValue(item, input.dataset.field, state.source.wavelength);
       if (document.activeElement === input) {
         if (input.type === 'text' || input.getAttribute('aria-invalid') === 'true') continue;
         if (input.type === 'number' && input.valueAsNumber === value) continue;

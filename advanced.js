@@ -82,7 +82,7 @@
     if(analysisToOpen==='object'){const i=result.rays.findIndex(r=>r.status==='detected'&&r.objectHits?.length);if(i>=0){rayIndex=i;stepIndex=Math.max(0,result.rays[i].events.findIndex(e=>e.type==='object'));}}
     rayIndex=Math.min(Math.max(0,rayIndex),Math.max(0,result.rays.length-1));stepIndex=Math.min(Math.max(0,stepIndex),(result.rays[rayIndex]?.events.length||0)-1);
     view.set(state,result,rayIndex,stepIndex);if(fitNext){fitNext=false;view.fit();}
-    if(ed)AdvEditor.render($('editor'),state,patch);
+    if(ed)AdvEditor.render($('editor'),state,patch,result);
     if(recalc||ed||ins)AdvInspector.render($('inspection'),{scene:state,result,selectedRayIndex:rayIndex,selectedStepIndex:stepIndex,onRay:i=>setRay(i,0),onStep:j=>setRay(rayIndex,j)});
     if(analysisToOpen==='object')AdvInspector.showObject($('inspection'));
     if(analysisToOpen==='polarization')AdvInspector.showPolarization($('inspection'));
