@@ -81,13 +81,14 @@
     if(recalc||!result)result=AdvancedOptics.simulate(state);
     if(analysisToOpen==='object'){const i=result.rays.findIndex(r=>r.status==='detected'&&r.objectHits?.length);if(i>=0){rayIndex=i;stepIndex=Math.max(0,result.rays[i].events.findIndex(e=>e.type==='object'));}}
     rayIndex=Math.min(Math.max(0,rayIndex),Math.max(0,result.rays.length-1));stepIndex=Math.min(Math.max(0,stepIndex),(result.rays[rayIndex]?.events.length||0)-1);
-    view.set(state,result,rayIndex,stepIndex);if(fitNext){fitNext=false;view.fit();}
+    view.set(state,result,rayIndex,stepIndex);
     if(ed)AdvEditor.render($('editor'),state,patch,result);
-    if(recalc||ed||ins)AdvInspector.render($('inspection'),{scene:state,result,selectedRayIndex:rayIndex,selectedStepIndex:stepIndex,onRay:i=>setRay(i,0),onStep:j=>setRay(rayIndex,j)});
+    if(recalc||ed||ins)AdvInspector.render($('inspection'),{scene:state,result,selectedRayIndex:rayIndex,selectedStepIndex:stepIndex,onRay:i=>setRay(i,0),onStep:j=>setRay(rayIndex,j),onCardinalWavelength:view.setImageReference});
     if(analysisToOpen==='object')AdvInspector.showObject($('inspection'));
     if(analysisToOpen==='polarization')AdvInspector.showPolarization($('inspection'));
     if(analysisToOpen==='ray')AdvInspector.showRay($('inspection'));
     analysisToOpen=null;
+    if(fitNext){fitNext=false;view.fit();}
     const count=result.detectors.reduce((a,d)=>a+d.hits.length,0),specimen=state.elements.find(e=>e.type==='object');
     const seeds=result.emittedCount??result.rays.length;
     $('traceBadge').textContent=specimen?seeds+' 条入射采样 / '+result.rays.length+' 条追迹路径':result.rays.length+' 条光线　/　'+result.wavelengths.length+' λ';
@@ -101,9 +102,19 @@
       else if(!count)info.push('可检查图案灰度、出光方向和探测屏位置');
       if(result.rays.length>850)info.push('画布抽样显示路径；统计使用全部路径');
     }
-    if(rr)info.push(rr.complete?'4f 中继：物面、共焦面与探测面均已对齐':rr.confocal?'两镜共焦；物面或探测面未对齐外侧焦面':'两镜内侧焦面间隔 '+fmt(rr.gap)+' mm');
-    const g=gs.find(g=>g.lenses.some(e=>e.id===state.selected));if(g)info.push(g.name+(g.ok?' · 共轴组 EFL '+fmt(g.metrics?.efl)+' mm':' · 镜片不共轴，显示各自光轴'));
+    if(rr){
+      const reference='（'+rr.wavelength+' nm）';
+      if(rr.complete)info.push('4f 近轴中继'+reference+' · 有限物面成像于探测面');
+      else if(rr.confocal)info.push('两镜近轴共焦'+reference+' · 平行束入射时近轴平行出射');
+      else {
+        const gap=Math.abs(rr.gap)<.01?Number((rr.gap*1000).toPrecision(3))+' µm':fmt(rr.gap,3)+' mm';
+        info.push((rr.nearlyConfocal?'接近共焦':'两镜内侧焦面')+reference+' · 轴向差 F₂ − F₁′ = '+gap);
+      }
+    }
+    const g=gs.find(g=>g.lenses.some(e=>e.id===state.selected));if(g)info.push(g.name+(g.ok?(g.metrics?.valid?' · 共轴组 EFL '+fmt(g.metrics.efl)+' mm':' · 镜组近轴基准不可用'):' · 镜片不共轴，显示各自光轴'));
     else if(state.selected==='source')info.push('当前选择：光源');else{const m=result.lensMetrics.find(v=>v.id===state.selected);if(m)info.push('选中镜片：EFL '+fmt(m.efl)+' mm　BFL '+fmt(m.bfl)+' mm');}
+    if(state.canvas.cardinal&&result.wavelengths.length>1&&result.lensMetrics.length)
+      info.push('F、H 标记按光源参考波长 '+(state.source.wavelength??550)+' nm');
     const warning=result.warnings[0];$('statusLine').classList.toggle('warn',!!warning);$('statusLine').textContent=warning||info.join('　·　');
     for(const k of canvasToggles)$(k).checked=state.canvas[k];
     for(const k of ['gridStep','opacity','theme'])$(k).value=state.canvas[k];buttons();

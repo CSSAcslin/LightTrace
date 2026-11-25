@@ -5,7 +5,7 @@
   const rad=Math.PI/180, clamp=(v,a,b)=>Math.max(a,Math.min(b,v)), num=Number.isFinite;
   const vec=(x,y)=>({x,y}), plus=(a,b)=>vec(a.x+b.x,a.y+b.y), minus=(a,b)=>vec(a.x-b.x,a.y-b.y);
   const dist=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y), dot=(a,b)=>a.x*b.x+a.y*b.y;
-  const local=(e,x,y)=>{const t=e.angle*rad,c=Math.cos(t),s=Math.sin(t);return vec(e.x+c*x-s*y,e.y+s*x+c*y)};
+  const local=(e,x,y)=>{const t=(e.angle??0)*rad,c=Math.cos(t),s=Math.sin(t);return vec(e.x+c*x-s*y,e.y+s*x+c*y)};
   const aligned=(a,b)=>Math.abs(Math.sin((a-b)*rad))<1e-6&&Math.cos((a-b)*rad)>0;
   function segmentDistance(p,a,b){const d=minus(b,a),u=clamp(dot(minus(p,a),d)/(dot(d,d)||1),0,1);return dist(p,vec(a.x+d.x*u,a.y+d.y*u));}
   function spectral(w){const stops=[[380,132,106,240],[435,133,134,255],[480,89,179,255],[500,88,225,212],[540,124,232,151],[575,214,232,111],[600,251,188,104],[650,255,121,111],[780,190,95,124]];let j=1;while(j<stops.length-1&&w>stops[j][0])j++;const a=stops[j-1],b=stops[j],t=clamp((w-a[0])/(b[0]-a[0]),0,1);return 'rgb('+[1,2,3].map(i=>Math.round(a[i]+(b[i]-a[i])*t)).join(',')+')';}
@@ -27,22 +27,31 @@
     if(!(ma?.efl>0&&mb?.efl>0))return null;
     const A=local(a,ma.backFocalX,0),B=local(b,mb.frontFocalX,0),objectPlane=local(a,ma.frontFocalX,0),imagePlane=local(b,mb.backFocalX,0);
     const u=vec(Math.cos(a.angle*rad),Math.sin(a.angle*rad)),v=vec(-u.y,u.x);
-    if(Math.abs(dot(minus(b,a),v))>.01)return null;
-    const gap=dot(minus(B,A),u),tolerance=Math.max(.02,Math.min(.25,Math.min(ma.efl,mb.efl)*.001)),confocal=Math.abs(gap)<=tolerance;
+    const separation=dot(minus(b,a),u);
+    if(Math.abs(dot(minus(b,a),v))>1e-7||separation<a.thickness)return null;
+    const localPair=[{...a,x:0,y:0,angle:0},{...b,x:separation,y:0,angle:0}];
+    const pair=result.paraxial.valid ? result.paraxial :
+      AdvancedOptics.paraxial({source:{type:'collimated'},elements:localPair},ma.wavelength);
+    const gap=dot(minus(B,A),u),confocal=pair.valid&&pair.efl===null;
+    const nearlyConfocal=!confocal&&Math.abs(gap)<=Math.max(.02,Math.min(.25,Math.min(ma.efl,mb.efl)*.001));
     const specimen=scene.elements.find(e=>e.type==='object');
     if(specimen&&specimen.interaction!=='scatter')return null;
-    const object=specimen||scene.source,objectMatch=(specimen||scene.source.type!=='collimated')&&Math.abs(dot(minus(object,objectPlane),u))<=tolerance&&aligned(object.angle,a.angle);
-    const detectorMatch=scene.elements.some(e=>e.type==='screen'&&aligned(e.angle,a.angle)&&Math.abs(dot(minus(e,imagePlane),u))<=tolerance);
-    return {gap,confocal,complete:confocal&&objectMatch&&detectorMatch,A,B,angle:a.angle,objectPlane,imagePlane,tolerance};
+    const object=specimen||scene.source,objectMatch=(specimen||scene.source.type!=='collimated')&&Math.abs(dot(minus(object,objectPlane),u))<1e-7&&aligned(object.angle,a.angle);
+    const detectorMatch=scene.elements.some(e=>e.type==='screen'&&aligned(e.angle,a.angle)&&Math.abs(dot(minus(e,imagePlane),u))<1e-7);
+    return {gap,confocal,nearlyConfocal,complete:confocal&&objectMatch&&detectorMatch,A,B,angle:a.angle,wavelength:ma.wavelength};
   }
   function create(canvas,handlers) {
-    const c=canvas.getContext('2d');let scene,result,rayIndex=0,stepIndex=-1,groups=[],relay=null;
+    const c=canvas.getContext('2d');let scene,result,rayIndex=0,stepIndex=-1,groups=[],relay=null,imageReference=null;
     let w=1,h=1,scale=1,fitScale=1,cx=0,cy=0,mode='select',drag=null,measurement=[],pointer=null,frame=0,handle=null,snapNote='',labelBoxes=[];
     const P=p=>vec(w/2+(p.x-cx)*scale,h/2-(p.y-cy)*scale), W=p=>vec(cx+(p.x-w/2)/scale,cy-(p.y-h/2)/scale);
     const queue=()=>{if(!frame)frame=requestAnimationFrame(()=>{frame=0;draw()})};
-    function set(s,r,ri,si){const changed=result!==r;scene=s;result=r;rayIndex=ri;stepIndex=si;if(changed){groups=groupInfo(s);relay=relayInfo(s,r);}queue();}
+    function set(s,r,ri,si){const changed=result!==r;scene=s;result=r;rayIndex=ri;stepIndex=si;if(changed){groups=groupInfo(s);relay=relayInfo(s,r);imageReference=null;}queue();}
+    function setImageReference(wavelength,field,{imageX,magnification}){
+      if(imageReference?.wavelength===wavelength&&imageReference.field===field&&imageReference.imageX===imageX&&imageReference.magnification===magnification)return;
+      imageReference={wavelength,field,imageX,magnification};queue();
+    }
     function bounds(){const pts=[scene.source];for(const e of scene.elements){if(solidSpecimen(e)){pts.push(...specimenEdges(e));continue;}const a=(e.type==='stop'?e.outerDiameter||100:e.aperture)/2;for(const x of [0,e.type==='lens'?e.thickness:0])for(const y of [-a,a])pts.push(local(e,x,y));}for(const ray of result?.rays||[]){if(ray.points[0])pts.push(ray.points[0]);for(const v of ray.events)pts.push(v);}return pts.filter(v=>num(v.x)&&num(v.y));}
-    function fit(){if(!scene)return;const pts=bounds();let x0=Infinity,x1=-Infinity,y0=Infinity,y1=-Infinity;for(const p of pts){x0=Math.min(x0,p.x);x1=Math.max(x1,p.x);y0=Math.min(y0,p.y);y1=Math.max(y1,p.y);}const im=result?.paraxial?.imageX,span=Math.max(30,x1-x0);if(num(im)&&(im>x0-span*1.1&&im<x1+span*1.1)){x0=Math.min(x0,im);x1=Math.max(x1,im);}cx=(x0+x1)/2;cy=(y0+y1)/2;scale=fitScale=clamp(Math.min((w-60)/Math.max(45,x1-x0+20),(h-110)/Math.max(32,y1-y0+10)),.00002,25);queue();handlers.zoom(100);}
+    function fit(){if(!scene)return;const pts=bounds();let x0=Infinity,x1=-Infinity,y0=Infinity,y1=-Infinity;for(const p of pts){x0=Math.min(x0,p.x);x1=Math.max(x1,p.x);y0=Math.min(y0,p.y);y1=Math.max(y1,p.y);}const im=(imageReference||result?.paraxial)?.imageX,span=Math.max(30,x1-x0);if(num(im)&&(im>x0-span*1.1&&im<x1+span*1.1)){x0=Math.min(x0,im);x1=Math.max(x1,im);}cx=(x0+x1)/2;cy=(y0+y1)/2;scale=fitScale=clamp(Math.min((w-60)/Math.max(45,x1-x0+20),(h-110)/Math.max(32,y1-y0+10)),.00002,25);queue();handlers.zoom(100);}
     function resize(){const r=canvas.getBoundingClientRect(),d=window.devicePixelRatio||1;w=r.width;h=r.height;canvas.width=Math.max(1,Math.round(w*d));canvas.height=Math.max(1,Math.round(h*d));c.setTransform(d,0,0,d,0,0);fit();}
     function zoom(f,p=vec(w/2,h/2)){const at=W(p);scale=clamp(scale*f,.015,100);cx=at.x-(p.x-w/2)/scale;cy=at.y+(p.y-h/2)/scale;handlers.zoom(Math.round(100*scale/fitScale));queue();}
     function line(a,b,color,weight=1,dash=[]){if(!a||!b||![a.x,a.y,b.x,b.y].every(num))return;const x=P(a),y=P(b);c.beginPath();c.setLineDash(dash);c.strokeStyle=color;c.lineWidth=weight;c.moveTo(x.x,x.y);c.lineTo(y.x,y.y);c.stroke();c.setLineDash([]);}
@@ -192,21 +201,36 @@
         }
       }
       c.globalAlpha=1;
-      const card=result.paraxial;
-      if(v.imagePlane&&card.valid&&num(card.imageX)&&Math.abs(source.angle)<1e-7){
-        const x=card.imageX,virt=x<card.lastX,tone=light?'#8b5e88':'#bc95bf',hit=highlight?.objectHits?.[0],sampleY=specimen?(hit?(specimen.y+hit.localY)*card.magnification:null):source.type==='collimated'?0:(source.y+(highlight?.field||0))*card.magnification;
+      const card=imageReference||result.paraxial;
+      const collimated=!specimen&&source.type==='collimated';
+      const field=card.field??highlight?.field??0;
+      const objectPoint=specimen||local(source,0,field);
+      const sourceAngle=source.angle??0;
+      if(v.imagePlane&&result.paraxial.valid&&num(card.imageX)&&objectPoint.x<result.paraxial.firstX&&Math.cos(sourceAngle*rad)>0){
+        const x=card.imageX,virt=x<result.paraxial.lastX,tone=light?'#8b5e88':'#bc95bf',hit=highlight?.objectHits?.[0];
+        const sampleY=specimen?(hit?(specimen.y+hit.localY)*card.magnification:null):
+          collimated?(Math.abs(sourceAngle)<1e-7?0:null):objectPoint.y*card.magnification;
+        const subject=specimen?'图案物面':source.type==='field'?'场点 '+fixed(field)+' mm':'点光源';
+        const plane=collimated?(virt?'平行束近轴虚焦面':'平行束近轴后焦面'):
+          subject+(virt?' · 近轴虚像面':' · 近轴实像面');
         line(vec(x,W(vec(0,45)).y),vec(x,W(vec(0,h-35)).y),tone,1,[5,6]);
-        label(virt?'近轴虚像面':'近轴像面',vec(x,W(vec(0,65)).y),tone,'below',true);
+        label(plane+' · '+card.wavelength+' nm',vec(x,W(vec(0,65)).y),tone,'below',true);
         if(num(sampleY))circle(vec(x,sampleY),3,null,tone);
-        if(virt&&highlight){const lenses=es.filter(e=>e.type==='lens').sort((a,b)=>a.x-b.x),last=lenses.at(-1);for(const r of rays){
-          if(r.field!==highlight.field||r.wavelength!==highlight.wavelength||(specimen&&(!hit||r.objectHits?.[0]?.localY!==hit.localY)))continue;const ex=r.events.filter(e=>e.type==='lens').at(-1);if(!ex||ex.elementId!==last?.id||ex.surface!=='S2'||ex.kind!=='refract'||ex.outDirection.x<=1e-9)continue;const d=ex.outDirection,dt=(x-ex.x)/d.x;if(dt<0)line(ex,plus(ex,vec(dt*d.x,dt*d.y)),tone,.8,[3,5]);
+        if(virt){const lenses=es.filter(e=>e.type==='lens').sort((a,b)=>a.x-b.x);
+          const extensionX=Math.max(x,W(vec(0,0)).x);
+          for(const r of rays){
+          if(r.field!==field||r.wavelength!==card.wavelength||(specimen&&(!hit||r.objectHits?.[0]?.localY!==hit.localY)))continue;
+          const hits=r.events.filter(e=>e.type==='lens');
+          if(hits.length!==2*lenses.length||!hits.every((e,i)=>e.elementId===lenses[Math.floor(i/2)].id&&e.surface===(i%2?'S2':'S1')&&e.kind==='refract'))continue;
+          const ex=hits.at(-1),d=ex.outDirection;if(d.x<=1e-9)continue;
+          const dt=(extensionX-ex.x)/d.x;if(dt<0)line(ex,plus(ex,vec(dt*d.x,dt*d.y)),tone,.8,[3,5]);
         }}
       }
       if(highlight){loop(highlight.points,null,light?'#8f6726':'#fae8b4',1.7);for(const e of highlight.events)circle(e,2,light?'#92713f':'#ddc78f');const event=highlight.events[stepIndex];if(event){const p=vec(event.x,event.y),n=event.normal;if(n){line(plus(p,vec(-n.x*23/scale,-n.y*23/scale)),plus(p,vec(n.x*23/scale,n.y*23/scale)),light?'#973e68':'#f1adcb',1.2,[3,3]);}circle(p,5,null,light?'#9e476b':'#efaac7');label('● '+(stepIndex+1)+' / '+event.surface,p,light?'#874267':'#edc5d7','above',true);}}
       for(const d of result.detectors||[]){for(const hit of d.hits){c.globalAlpha=weighted?clamp(Math.sqrt(hit.weight??1),0,1):1;if(num(hit.x)&&num(hit.globalY))circle(vec(hit.x,hit.globalY),2.2,v.spectral?spectral(hit.wavelength):fg);}}c.globalAlpha=1;
       const sy=source.type==='collimated'?source.width/2:source.type==='field'?source.height/2:0;line(local(source,0,-sy),local(source,0,sy),light?'#956727':'#e4c27a',2);circle(source,3,light?'#ac7d3d':'#f2ce84');label('光源',local(source,0,Math.max(sy,5/scale)),light?'#8e692a':'#e5cb92','above',true);
       for(const e of es){let y=e.type==='stop'?(e.outerDiameter||100)/2:e.aperture/2;label(e.name||e.id,local(e,0,y),light?'#405d48':fg,'above',true);}
-      if(v.cardinal){for(const m of result.lensMetrics||[]){const e=es.find(o=>o.id===m.id);if(e&&(e.id===scene.selected||v.allMarks))marks(e,m,'',light);}for(const g of groups)if(g.ok&&(v.allMarks||g.lenses.some(e=>e.id===scene.selected)))marks(g.first,g.metrics,'组',light);if(relay?.confocal){line(local({...relay.A,angle:relay.angle},0,-25/scale),local({...relay.A,angle:relay.angle},0,25/scale),light?'#71783c':'#c1cb86',1,[3,3]);label(relay.complete?'4f · 共焦面':'共焦面',relay.A,light?'#687438':'#c3d18e','above',true);}}
+      if(v.cardinal){for(const m of result.lensMetrics||[]){const e=es.find(o=>o.id===m.id);if(e&&(e.id===scene.selected||v.allMarks))marks(e,m,'',light);}for(const g of groups)if(g.ok&&(v.allMarks||g.lenses.some(e=>e.id===scene.selected)))marks(g.first,g.metrics,'组',light);if(relay?.confocal){line(local({...relay.A,angle:relay.angle},0,-25/scale),local({...relay.A,angle:relay.angle},0,25/scale),light?'#71783c':'#c1cb86',1,[3,3]);label((relay.complete?'4f · 近轴共焦面':'近轴共焦面')+' · '+relay.wavelength+' nm',relay.A,light?'#687438':'#c3d18e','above',true);}}
       const sel=scene.selected==='source'?source:es.find(e=>e.id===scene.selected);if(sel&&mode==='select'){circle(sel,4,null,light?'#477765':'#9dd2bb');handle=local(sel,27/scale,-13/scale);line(sel,handle,light?'#678774':'#94bf9f',1,[3,3]);circle(handle,4.5,light?'#f0f4e7':'#264a3d','#92bd9d');}
       if(measurement.length){const a=measurement[0],b=measurement[1]||(mode==='ruler'&&pointer?W(pointer):null);circle(a,3,'#e4ad6c');if(b){circle(b,3,'#e4ad6c');line(a,b,'#dfac6b',1.5,[5,3]);label(fixed(dist(a,b),2)+' mm  ·  '+fixed(Math.atan2(b.y-a.y,b.x-a.x)/rad,1)+'°',vec((a.x+b.x)/2,(a.y+b.y)/2),light?'#94672f':'#e5bd88','above',true);}}
       if(snapNote&&drag){label(snapNote,W(vec(drag.last.x,drag.last.y-12)),light?'#4e785e':'#b9d9b6','above');}
@@ -233,7 +257,7 @@
     canvas.addEventListener('wheel',e=>{e.preventDefault();zoom(Math.exp(-clamp(e.deltaY,-150,150)*.0018),eventPoint(e));},{passive:false});
     canvas.addEventListener('keydown',e=>{if(['+','=','-','0','Escape'].includes(e.key)){e.preventDefault();if(e.key==='0')fit();else if(e.key==='Escape'){measurement=[];queue();}else zoom(e.key==='-'?1/1.25:1.25);}});
     new ResizeObserver(resize).observe(canvas);resize();
-    return {set,fit,zoom,draw,setMode(m){mode=m;queue();},clearMeasure(){measurement=[];queue();},getRelay:()=>relay,getGroups:()=>groups};
+    return {set,setImageReference,fit,zoom,draw,setMode(m){mode=m;queue();},clearMeasure(){measurement=[];queue();},getRelay:()=>relay,getGroups:()=>groups};
   }
   window.AdvCanvas={create};
 })();

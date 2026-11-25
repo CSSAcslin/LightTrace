@@ -256,27 +256,107 @@
     return html+'<p class="awi-note">方向角从全局 +x 逆时针量取。入射角和折、反射角相对于界面法线量取。ρ 是光源光束或角锥的归一化采样位置。</p>';
   }
 
+  function cardinalWavelength({scene,result},choice) {
+    return result.wavelengths.find(w=>String(w)===choice) ?? scene.source.wavelength ?? 550;
+  }
+  function cardinalReference(opts,view) {
+    const {scene,result}=opts;
+    const ref=cardinalWavelength(opts,view.cardinalLambda);
+    const wave=result.byWavelength.find(line=>line.wavelength===ref) || result.paraxial;
+    const field=view.tab==='cardinal'?fieldSelection(scene,result,view).field:result.rays[opts.selectedRayIndex]?.field??0;
+    const object=scene.elements.find(e=>e.type==='object');
+    const collimated=!object && scene.source.type==='collimated';
+    const objectX=object?.x ?? scene.source.x-field*Math.sin((scene.source.angle||0)*Math.PI/180);
+    const imageX=wave?.valid?referencePlane(scene,wave,field):null;
+    const magnification=finite(imageX)&&!collimated?1/(wave.matrix.C*(wave.firstX-objectX)+wave.matrix.D):null;
+    return {ref,wave,field,object,collimated,objectX,imageX,magnification};
+  }
+  // Both end surfaces must be reached in order; bypass and reflected rays
+  // cannot be compared with the first-to-last-vertex transfer matrix.
+  function transmittedLensEvents(ray,lenses) {
+    if(ray.events.some(e=>['tir','reflect','diffract','scatter'].includes(e.kind)))return null;
+    const refractions=ray.events.filter(e=>e.kind==='refract');
+    if(refractions.length!==2*lenses.length || !lenses.every((lens,i)=>
+      refractions[2*i].elementId===lens.id && refractions[2*i].surface==='S1' &&
+      refractions[2*i+1].elementId===lens.id && refractions[2*i+1].surface==='S2'))return null;
+    return refractions;
+  }
+  function pupilCrossings(samples,lastX) {
+    let side=samples.filter(s=>s.height>1e-10);
+    if(!side.length)side=samples.filter(s=>s.height< -1e-10);
+    if(!side.length)return '';
+    side.sort((a,b)=>Math.abs(a.height)-Math.abs(b.height));
+    const picks=side.length===1?[[side[0],'可用样本']]:[[side[0],'靠轴样本'],[side.at(-1),'边缘样本']];
+    const rows=picks.map(([sample,zone])=>{
+      const exit=sample.exit, dir=exit.outDirection;
+      const parallel=Math.abs(dir.y)<1e-14;
+      const distance=parallel?null:-exit.y/dir.y;
+      const intercept=parallel?'—':num(exit.x-lastX+distance*dir.x,5);
+      const direction=parallel?(Math.abs(exit.y)<1e-10?'沿光轴':'平行于轴'):distance>=0?'正向实交':'反向延长';
+      return [zone,num(sample.height,5),num(exit.y,5),num(exit.outAngle,5),intercept,direction];
+    });
+    return details('靠轴光与边缘光分别在哪里交轴？',
+      table(['入瞳取样','入射高 / mm','出射高 / mm','出射角 / °','交轴 x − 后顶点 / mm','相对出射方向'],rows)+
+      '<p class="awi-note">从入瞳同一侧选取实际透过镜组的非中央光线，以末镜出射方向作直线求轴交点。这里显示离散采样；改变光束宽度或增加光线数可比较不同高度。</p>');
+  }
+  function beamAngles({scene,result},wave,field,ref) {
+    const title='<h4 class="awi-subtitle">同束光的入射角与出射角</h4>';
+    if(!result.wavelengths.includes(ref))return title+empty('这条参考波长只计算近轴基准。选择一条已追迹的谱线可对照出射角。');
+    const lenses=scene.elements.filter(e=>e.type==='lens').sort((a,b)=>a.x-b.x);
+    const samples=[];
+    for(const ray of result.rays) {
+      if(ray.wavelength!==ref || ray.field!==field)continue;
+      const events=transmittedLensEvents(ray,lenses);
+      if(!events)continue;
+      const first=events[0],last=events.at(-1);
+      if(first.inDirection.x<=0 || last.outDirection.x<=0 || !(last.weightOut>0))continue;
+      const slope=first.inDirection.y/first.inDirection.x;
+      const y=first.y+(wave.firstX-first.x)*slope;
+      const predicted=Math.atan(wave.matrix.C*y+wave.matrix.D*slope)*180/Math.PI;
+      samples.push({height:y,inAngle:first.inAngle,predicted,outAngle:last.outAngle,exit:last});
+    }
+    if(!samples.length)return title+empty('当前场点和谱线没有依次透过全部镜片的正向光线。');
+    const rows=[['首镜入射 · 逐面追迹','inAngle'],['末镜出射 · 近轴矩阵','predicted'],['末镜出射 · 逐面追迹','outAngle']].map(([label,key])=>{
+      const angles=samples.map(s=>s[key]), low=Math.min(...angles), high=Math.max(...angles);
+      return [label,num(low,5),num(high,5),samples.length>1?num(high-low,5):'—'];
+    });
+    const axial=scene.source.type==='collimated' && Math.abs(scene.source.y??0)<1e-9 && Math.abs(scene.source.angle||0)<1e-9;
+    return title+table(['方向角（°）','最小','最大','角宽 Δα'],rows)+
+      '<p class="awi-note">'+esc(fieldLabel(scene,field))+' · '+num(ref)+' nm · '+samples.length+' 条完整透射样本。'+
+      '角宽取最大角减最小角，零表示这些采样方向相同。矩阵将首顶点平面的高度 y 和入射斜率 u 换算为出射斜率 Cy + Du。逐面追迹按实际交点和法线计算。</p>'+
+      (axial?pupilCrossings(samples,wave.lastX):'');
+  }
   function cardinalPanel(opts,view) {
     const {scene,result} = opts;
-    const records = result.byWavelength || [];
-    const wave = byChoice(records, view.cardinalLambda) || result.paraxial;
-    const ref = wave?.wavelength ?? scene.source.wavelength;
-    const fieldOpt = records.map(item=>option(item.wavelength,num(item.wavelength,2)+' nm',ref)).join('');
-    let html = '<div class="awi-toolbar">'+(records.length?pick('cardinalLambda','参考波长',fieldOpt):'')+'<span class="awi-note">正方向沿系统 +x，长度单位 mm。</span></div>';
+    const {ref,wave,field,object,collimated,objectX,imageX,magnification}=view.cardinal;
+    const sourceWave=scene.source.wavelength??550;
+    const wavelengths=[...new Set([sourceWave,...result.wavelengths])].sort((a,b)=>a-b);
+    const waveOpt=wavelengths.map(w=>option(w,num(w,3)+' nm'+
+      (!result.wavelengths.includes(w)?'（光源参考，未追迹）':''),ref)).join('');
+    const fields=collectFields(scene,result.rays);
+    let html = '<div class="awi-toolbar">'+pick('cardinalLambda','参考波长',waveOpt)+
+      (wave?.valid && fields.length>1?pick('field','场点',fields.map(f=>option(f,fieldLabel(scene,f),field)).join('')):'')+
+      '<span class="awi-note">正方向沿系统 +x，长度单位 mm。</span></div>';
     if (!wave?.valid) {
       html += empty(wave?.reason || '当前光轴布置不满足同轴折射系统的近轴基准条件。');
     } else {
       const fflSigned = finite(wave.frontFocalX) && finite(wave.firstX) ? wave.frontFocalX-wave.firstX : null;
+      const hasConjugate=collimated||objectX<wave.firstX;
+      const imageName=finite(imageX)?(imageX<wave.lastX?'近轴虚像面':'近轴实像面'):'近轴像面';
+      const imageInfo=collimated?'平行入射的像方焦面':'物面 x = '+scalar(objectX);
       html += '<div class="awi-metrics">'+
         metric('系统有效焦距 EFL',finite(wave.efl)?scalar(wave.efl):'∞','从像方主面量取')+
-        metric('后焦截距 BFL',scalar(wave.bfl),'从最后面顶点至后焦点')+
-        metric('前焦截距 FFL（有符号）',scalar(fflSigned),'从首面顶点至前焦点')+
-        metric('近轴像面 x′',scalar(wave.imageX),finite(wave.magnification)?'横向倍率 '+num(wave.magnification,5)+' ×':'')+'</div>';
+        metric('后焦截距 BFL',finite(wave.efl)?scalar(wave.bfl):'无有限焦点','从最后面顶点至后焦点')+
+        metric('前焦截距 FFL（有符号）',finite(wave.efl)?scalar(fflSigned):'无有限焦点','从首面顶点至前焦点')+
+        metric(imageName+' x′',finite(imageX)?scalar(imageX):hasConjugate?'∞':'—',
+          imageInfo+(finite(magnification)?' · 横向倍率 '+num(magnification,5)+' ×':''))+'</div>';
+      if(!finite(wave.efl))html+='<p class="awi-note">C ≈ 0，系统近轴无焦。同束平行入射光在近轴模型中出射后仍彼此平行。来自有限物点的一束光可以在有限距离重新会聚。</p>';
+      if(finite(imageX)&&imageX<wave.lastX)html+='<p class="awi-note">像面在末镜后顶点的入射侧。近轴出射光线反向延长后在此相交。</p>';
+      if(!object)html+=beamAngles(opts,wave,field,ref);
       html += '<div class="awi-cardinal-body"><div><h4>顶点到顶点的传递矩阵</h4>'+matrixMarkup(wave.matrix)+'<p class="awi-note">A、D 无量纲，B 以 mm 计，C 以 mm⁻¹ 计。</p></div>'+
         table(['基准面 / 焦点','物方 x / mm','像方 x / mm'],[['镜片组顶点',num(wave.firstX),num(wave.lastX)],['主面 H，H′',num(wave.h1X),num(wave.h2X)],['焦点 F，F′',num(wave.frontFocalX),num(wave.backFocalX)]])+'</div>';
-      const C=wave.matrix?.C;
       html += details('展开顶点、主面与焦点的换算',formulaRows([
-        ['EFL = −1/C',finite(C)&&Math.abs(C)>1e-14?scalar(wave.efl):'无焦系统'],
+        ['EFL = −1/C',finite(wave.efl)?scalar(wave.efl):'无焦系统'],
         ['BFL = −A/C，FFL(有符号) = D/C',scalar(wave.bfl)+'，'+scalar(fflSigned)],
         ['xH = xF + EFL，xH′ = xF′ − EFL',scalar(wave.h1X)+'，'+scalar(wave.h2X)],
         ['矩阵适用条件','两侧介质为空气，光线在共轴系统内作一阶近似。']
@@ -293,14 +373,15 @@
     }
     return html;
   }
-  function byChoice(rows,value) {
-    return rows.find(row=>String(row.wavelength)===String(value)) || rows[Math.floor(rows.length/2)];
+  function fieldSelection(scene,result,view) {
+    const fields=collectFields(scene,result.rays||[]);
+    const field=fields.find(f=>String(f)===String(view.field)) ?? fields.reduce((best,f)=>Math.abs(f)<Math.abs(best)?f:best,fields[0]);
+    return {fields,field};
   }
   function detectorContext(scene,result,view) {
     const screens=result.detectors || [];
     const detector=screens.find(d=>String(d.id)===String(view.screen)) || screens[0];
-    const fields=collectFields(scene,result.rays||[]);
-    const field=fields.find(f=>String(f)===String(view.field)) ?? fields.reduce((best,f)=>Math.abs(f)<Math.abs(best)?f:best,fields[0]);
+    const {fields,field}=fieldSelection(scene,result,view);
     const waveValues=result.wavelengths || [];
     const wavelength=waveValues.find(w=>String(w)===String(view.wavelength)) ?? 'all';
     const hits=detector?.hits || [];
@@ -648,14 +729,8 @@
       for(const ray of result.rays) {
         if(ray.wavelength!==wave.wavelength||ray.field!==field)continue;
         if(['blocked','evanescent','limit'].includes(ray.status))continue;
-        const events=ray.events||[];
-        if(events.some(e=>['tir','reflect','diffract'].includes(e.kind)))continue;
-        // Exclude rays that bypass any lens rim and alternate ray branches.
-        const refractions=events.filter(e=>e.kind==='refract');
-        const inOrder=lenses.every((lens,i)=>
-          refractions[2*i]?.elementId===lens.id&&refractions[2*i].surface==='S1'&&
-          refractions[2*i+1]?.elementId===lens.id&&refractions[2*i+1].surface==='S2');
-        if(!inOrder||refractions.length!==2*lenses.length)continue;
+        const refractions=transmittedLensEvents(ray,lenses);
+        if(!refractions)continue;
         const exit=refractions.at(-1), dir=exit.outDirection;
         if(!dir||dir.x<=0||Math.abs(dir.y)<1e-10)continue;
         const crossX=exit.x+(axisY-exit.y)*dir.x/dir.y;
@@ -754,6 +829,9 @@
     }
     const hasObject=opts.scene.elements.some(e=>e.type==='object');
     if(view.tab==='object'&&!hasObject)view.tab='ray';
+    view.cardinal=cardinalReference(opts,view);
+    const {ref,field,imageX,magnification}=view.cardinal;
+    opts.onCardinalWavelength?.(ref,field,{imageX,magnification});
     const rayIndex=Math.max(0,Math.trunc(opts.selectedRayIndex)||0);
     const selected=opts.result.rays[rayIndex];
     const header='<div class="awi-heading"><h3>光学分析</h3><span>'+ (selected?'光线 #'+(rayIndex+1)+'　'+esc(num(selected.wavelength,2))+' nm':'无光线')+'</span></div>';

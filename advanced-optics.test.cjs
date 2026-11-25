@@ -168,6 +168,60 @@ test('2-lens 4f principal-plane spacing relays the object 1:1 with zero net opti
   near(relay.imageX,lens2.x+p.backFocalX);
 });
 
+const relayPreset = require('./advanced-editor.js').presets.relay;
+function traceRelay(sourceChanges={}, shiftL2=0) {
+  const elements = relayPreset.elements.map(e=>e.id==='l2' ? {...e,x:e.x+shiftL2} : e);
+  return run(elements,{...relayPreset.source,...sourceChanges});
+}
+function centralFieldEdge(result) {
+  const ray = result.rays.find(r=>r.field===0 && r.pupil===1);
+  const exit = ray.events.findLast(e=>e.kind==='refract');
+  assert.equal(exit.elementId,'l2');
+  assert.equal(exit.surface,'S2');
+  return {ray,exit};
+}
+test('the 4f preset images a finite object plane with a converging cone despite zero system power',()=>{
+  const relay = traceRelay();
+  const p = relay.paraxial;
+  assert.equal(relayPreset.source.type,'field');
+  assert.equal(p.efl,null);
+  near(p.magnification,-1);
+  near(p.imageX,relayPreset.elements.find(e=>e.type==='screen').x);
+  const {ray,exit} = centralFieldEdge(relay);
+  near(exit.outAngle,-relayPreset.source.spread,.01);
+  assert.ok(exit.y*exit.outDirection.y<0);
+  near(axisCross(ray),p.imageX,1); // The marginal ray retains finite spherical aberration.
+
+  // L1 still collimates each object point. Its conjugate stays at L2's
+  // own back focal plane as L2 moves, even as the system power changes.
+  const moved = traceRelay({},-4).paraxial;
+  assert.ok(Number.isFinite(moved.efl));
+  near(moved.imageX-moved.lastX,p.imageX-p.lastX);
+  near(moved.magnification,-1);
+});
+test('a collimated beam through the confocal spherical relay approaches zero exit angle as it narrows',()=>{
+  const wide = traceRelay({type:'collimated',width:20});
+  const narrow = traceRelay({type:'collimated',width:2});
+  assert.equal(wide.paraxial.imageX,null);
+  assert.equal(narrow.paraxial.imageX,null);
+  const {exit} = centralFieldEdge(wide);
+  assert.ok(exit.y*exit.outDirection.y<0);
+  near(exit.outAngle,.794,.002);
+  near(centralFieldEdge(narrow).exit.outAngle,0,.001);
+});
+test('shortening the relay by 4 mm can yield a virtual paraxial focus while marginal rays still converge',()=>{
+  const wide = traceRelay({type:'collimated',width:20},-4);
+  const narrow = traceRelay({type:'collimated',width:.02},-4);
+  const p = wide.paraxial;
+  near(p.imageX-p.lastX,-951.418,.01);
+  const edge = centralFieldEdge(wide);
+  assert.ok(edge.exit.y*edge.exit.outDirection.y<0);
+  assert.ok(axisCross(edge.ray)>edge.exit.x);
+  const nearAxis = centralFieldEdge(narrow);
+  assert.ok(nearAxis.exit.y*nearAxis.exit.outDirection.y>0);
+  near(axisCross(nearAxis.ray),p.imageX,.01);
+});
+
 const object = {id:'O', type:'object', x:0, y:0, angle:0, aperture:33,
   interaction:'scatter', scatterAngle:20, scatterSamples:5,
   n:1.5, wedge:0, thickness:6, pattern:Array(33).fill(1)};

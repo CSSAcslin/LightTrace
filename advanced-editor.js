@@ -131,7 +131,7 @@
     magnifier: preset('厚透镜放大镜', '三个物点都在前焦平面与镜片之间。比较正立虚像的反向延长线与右侧屏上仍在发散的光束。',
       source({type: 'field', spectrum: 'mono', wavelength: 546.074, height: 8, spread: 8, rays: 9}),
       [lens(40), screen(108, {aperture: 64})]),
-    relay: preset('厚透镜 4f 中继', '两镜共用中间焦平面，物面和探测面落在外侧焦平面。沿轴移动一片镜可打破共焦。',
+    relay: preset('厚透镜 4f 中继', '三个物点位于 L1 前焦面。每个物点的光在两镜之间近似平行，经 L2 会聚到屏上。将光源改为平行光束可检验系统的无焦特性。',
       source({type: 'field', spectrum: 'mono', wavelength: 546.074, height: 8, spread: 4, rays: 7}),
       [lens(bfl, {...relayLens, name: '中继镜 L1'}),
         element('lens', 'l2', '中继镜 L2', 3 * bfl + relayThickness, relayLens),
