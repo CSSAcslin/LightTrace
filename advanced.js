@@ -35,6 +35,13 @@
     const errors=optErrors(out);if(errors.length)throw Error(errors[0]);return out;
   }
   const serialize=()=>({format:FORMAT,version:1,scene:state});
+  function waveLink() {
+    const snapshot={...serialize(),scene:{...state,name:registry[state.preset]?.name||'自定义进阶光路'}};
+    const encoded=encodeURIComponent(JSON.stringify(snapshot));
+    const link=$('waveLaunch');
+    link.href=encoded.length<=32000?'wave.html#scene='+encoded:'wave.html#import';
+    return encoded.length<=32000;
+  }
   function persistNow(){try{localStorage.setItem(KEY,JSON.stringify(serialize()));$('saveStatus').textContent='● 已本地保存';}catch{$('saveStatus').textContent='请导出 JSON 保存';}}
   function persist(){clearTimeout(saveTimer);saveTimer=setTimeout(persistNow,300);}
   function pushUndo(prev){if(!undo.length||JSON.stringify(undo.at(-1))!==JSON.stringify(prev)){undo.push(clone(prev));if(undo.length>45)undo.shift();}redo.length=0;buttons();}
@@ -78,7 +85,7 @@
   const view=AdvCanvas.create($('layoutCanvas'),{select,move,ray:selectCanvasRay,coordinate:t=>$('cursorPos').textContent=t,zoom:p=>$('zoomPct').textContent=p+'%',begin(){dragSnapshot=clone(state);},end(){if(dragSnapshot&&JSON.stringify(dragSnapshot)!==JSON.stringify(state)){pushUndo(dragSnapshot);lastEdit=null;}dragSnapshot=null;}});
   function render(){
     pending=0;const recalc=opticalDirty,ed=editorDirty,ins=inspectorDirty;opticalDirty=editorDirty=inspectorDirty=false;
-    if(recalc||!result)result=AdvancedOptics.simulate(state);
+    if(recalc||!result){result=AdvancedOptics.simulate(state);waveLink();}
     if(analysisToOpen==='object'){const i=result.rays.findIndex(r=>r.status==='detected'&&r.objectHits?.length);if(i>=0){rayIndex=i;stepIndex=Math.max(0,result.rays[i].events.findIndex(e=>e.type==='object'));}}
     rayIndex=Math.min(Math.max(0,rayIndex),Math.max(0,result.rays.length-1));stepIndex=Math.min(Math.max(0,stepIndex),(result.rays[rayIndex]?.events.length||0)-1);
     view.set(state,result,rayIndex,stepIndex);
@@ -135,6 +142,12 @@
     requestAnimationFrame(()=>{const board=$('editor').querySelector('.ae-pattern-board');board?.closest('section')?.scrollIntoView({block:'nearest'});});
   };
   $('exportScene').onclick=()=>download(new Blob([JSON.stringify(serialize(),null,2)],{type:'application/json'}),'光迹Pro-光学实验.json');
+  $('waveLaunch').onclick=()=>{
+    if(!waveLink()) {
+      $('exportScene').click();
+      notify('当前光路较大，已导出实验文件。请在二维页选择「打开实验」读取它。');
+    }
+  };
   $('savePng').onclick=()=>{view.draw();$('layoutCanvas').toBlob(b=>{if(b)download(b,'光迹Pro-曲面追迹.png');},'image/png');};
   $('importScene').onclick=()=>$('sceneFile').click();$('sceneFile').onchange=async e=>{try{const f=e.target.files[0];if(!f)return;if(f.size>250000)throw Error('配置超过 250 KB 限制。');apply(config(JSON.parse(await f.text())));notify('进阶实验已载入');}catch(err){notify('导入失败：'+err.message);}finally{e.target.value='';}};
   $('undo').onclick=()=>{if(!undo.length)return;redo.push(clone(state));const old=undo.pop();apply(old,false);buttons();};

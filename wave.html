@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#142d2c"><title>光迹 · 二维波动工作站</title>
+  <link rel="stylesheet" href="wave.css"><link rel="stylesheet" href="manual.css">
+</head>
+<body>
+<header class="w-nav">
+  <a class="w-brand" href="index.html" aria-label="光迹基础实验室"><svg viewBox="0 0 40 40" aria-hidden="true"><rect width="40" height="40" rx="10" fill="#27584d"/><g fill="none" stroke="#c8efcc" stroke-width="1.4"><path d="M5 30 35 10M5 10l30 20M20 5c-8 7-8 23 0 30 8-7 8-23 0-30Z"/></g></svg>光迹</a>
+  <nav aria-label="实验台"><a href="index.html">基础实验室</a><a href="advanced.html">进阶工作站</a><b aria-current="page">二维波动</b></nav>
+  <button id="manualOpen">实验手册</button>
+</header>
+<main class="w-page">
+  <header class="w-heading"><div><h1>二维波动工作站</h1><p id="experimentName"></p></div>
+    <div class="w-actions"><button id="openExperiment">打开实验</button><button id="saveExperiment" class="w-primary">↓ 保存实验</button><input type="file" id="experimentFile" accept="application/json,.json" hidden></div>
+  </header>
+  <div id="notice" class="w-notice" role="status" hidden></div>
+  <div class="w-layout">
+    <aside class="w-sidebar">
+      <section class="w-card"><div class="w-cardheading"><h2>光路配置</h2><span id="routeCount" class="w-meta"></span></div>
+        <div id="route" class="w-route" aria-label="光路元件"></div>
+        <div class="w-add"><select id="newType" aria-label="要添加的元件"><option value="object">二维物体</option><option value="thinLens">理想薄透镜</option><option value="phase">均匀移相片</option><option value="stop">圆形光阑</option><option value="polarizer">线偏振片</option><option value="retarder">波片</option><option value="screen">探测屏</option><option value="probe">观察截面</option></select><button id="addElement">＋ 添加</button></div>
+      </section>
+      <section class="w-card"><div class="w-cardheading"><h2 id="inspectorHeading">元件参数</h2></div><div id="inspector" class="w-inspector"></div></section>
+      <details class="w-card w-details" id="computeSettings"><summary>计算与采样</summary><div class="w-inspector">
+        <label>输入视场宽度（mm）<input id="inputWidth" type="number" min=".001" max="10000" step="any"></label>
+        <label>观察视场（mm，0 为自动）<input id="outputWidth" type="number" min="0" max="10000" step="any" value="0"></label>
+        <label>每边采样点数<select id="gridSize"><option>64</option><option>128</option><option>256</option><option>512</option></select></label>
+        <label class="w-check"><input type="checkbox" id="throughOnly"> 仅计算过镜分量，旁路功率单列</label>
+        <label>本机保存的实验<select id="recent"><option value="">选择记录…</option></select></label>
+        <button id="defaultExperiment">打开内置 4f 实验</button>
+      </div></details>
+    </aside>
+    <div class="w-work">
+      <div class="w-stagebar"><div><span class="w-statusdot"></span><strong id="status" role="status">准备计算</strong></div><span id="runStats" class="w-meta"></span></div>
+      <div class="w-pair">
+        <section class="w-card w-field">
+          <header class="w-cardheading"><h2>二维物体</h2><select id="objectChoice" aria-label="编辑的物体"></select></header>
+          <div class="w-fieldbody"><div class="w-viewport w-objectview"><canvas id="objectCanvas" width="420" height="420" aria-label="二维材料绘制面" tabindex="0"></canvas><div class="w-empty" id="emptyObject" hidden><span>当前光路中尚无二维物体</span><button id="addObject">＋ 在光源处添加</button></div></div>
+            <div class="w-caption"><span id="objectScale"></span><span>+y →　+z ↑</span></div></div>
+          <div class="w-controls">
+            <div class="w-formrow"><label>材料通道<select id="paintChannel"><option value="t">透明介质 T</option><option value="r">镜面反射 R</option><option value="s">散射 S</option><option value="opd">光程差 OPD</option></select></label><label>图案预设<select id="pattern"><option value="">应用图案…</option><option value="letter">不对称字母 F</option><option value="slits">双狭缝</option><option value="step">透明相位台阶 π/2</option><option value="pinhole">圆孔</option><option value="clear">全透明</option><option value="blank">全吸收</option></select></label></div>
+            <div class="w-toolstrip" role="group" aria-label="绘图工具"><button data-tool="brush" aria-pressed="true">画笔</button><button data-tool="line" aria-pressed="false">直线</button><button data-tool="rect" aria-pressed="false">矩形</button><button data-tool="erase" aria-pressed="false">擦除</button><button id="undoPaint" title="撤销上一笔">↶ 撤销</button></div>
+            <div class="w-formrow"><label id="paintValueLabel"><span>功率份额</span><input id="paintValue" type="number" min="0" max="1" step=".05" value="1"></label><label>笔刷半径（格）<input id="brushRadius" type="number" value="2" min="1" max="64"></label></div>
+            <div class="w-inline" id="opdUnits" hidden><label>光程差单位 <select id="opdUnit"><option value="nm">nm</option><option value="rad">rad（参考波长）</option></select></label></div>
+          </div>
+        </section>
+        <section class="w-card w-field">
+          <header class="w-cardheading"><h2>观察面</h2><select id="plane" aria-label="观察面"></select></header>
+          <div class="w-fieldbody"><div class="w-viewport"><canvas id="resultCanvas" width="420" height="420" aria-label="模拟光场分布，点击读数或拖动测量" tabindex="0"></canvas><div class="w-empty" id="resultOverlay" hidden></div></div><div class="w-caption"><span id="resultScale"></span><span id="gridLabel"></span></div></div>
+          <div class="w-controls">
+            <div class="w-tabs" id="fieldTabs" role="group" aria-label="显示的光学量"><button data-layer="intensity" aria-pressed="true">强度</button><button data-layer="phase" aria-pressed="false">相位</button><button data-layer="ellipse" aria-pressed="false">偏振</button><button data-layer="interference" aria-pressed="false">干涉</button></div>
+            <div class="w-formrow"><label>光谱通道<select id="line"></select></label><label>截面位置<select id="side"><option value="before">元件入射面</option><option value="after">元件出射面</option></select></label></div>
+            <div class="w-formrow" id="polOptions" hidden><label>偏振显示<select id="polLayer"><option value="ellipse">偏振椭圆</option><option value="q">S₁ / S₀</option><option value="u">S₂ / S₀</option><option value="v">S₃ / S₀</option><option value="dop">偏振度</option></select></label></div>
+            <div class="w-formrow" id="phaseOptions" hidden><label>偏振投影<select id="phaseAxis"><option value="y">Eᵧ</option><option value="z">E𝓏</option></select></label><label>空间模式<select id="phaseMode"></select></label></div>
+            <div class="w-formrow" id="interferenceOptions" hidden><label>移相检测<select id="measurementLayer"><option value="recovered">四帧重建相位</option><option value="frame0">原始帧 1 · 0</option><option value="frame1">原始帧 2 · π/2</option><option value="frame2">原始帧 3 · π</option><option value="frame3">原始帧 4 · 3π/2</option><option value="visibility">条纹可见度</option><option value="phaseError">圆周相位误差</option></select></label><label>参考臂附加光程（nm）<input id="referenceOPD" type="number" min="-10000000" max="10000000" step="any" value="0"></label></div>
+            <div id="intensityOptions" class="w-inline"><label><input type="checkbox" id="logScale"> 对数色标</label><label><input type="checkbox" id="lockScale"> 锁定强度色限</label></div>
+          </div>
+        </section>
+      </div>
+      <section class="w-card w-readout"><div class="w-cardheading"><h2>测量读数</h2><select id="probeMode" aria-label="测量工具"><option value="point">单点光谱</option><option value="roi">区域积分与光谱</option><option value="line">线剖面</option></select></div>
+        <div class="w-readoutgrid"><div><p id="probeHint">在观察面点击一个像素读取光谱。</p><output id="probeOutput"></output></div><canvas id="probeChart" width="460" height="100" aria-label="选中位置的光谱或线剖面"></canvas></div>
+        <div class="w-export"><button id="saveRead" disabled>↓ 测量 CSV</button><button id="saveImage">↓ 科学图 PNG</button><button id="saveData">↓ 图层数据 CSV</button></div>
+      </section>
+      <details class="w-card w-details" id="diagnostics"><summary>传播模型与能量账 <span id="diagCount"></span></summary><div id="diagnosticBody" class="w-diag"></div></details>
+    </div>
+  </div>
+</main>
+<script src="manual-basic.js"></script><script src="manual-advanced.js"></script><script src="manual.js"></script>
+<script src="mie-phase.js"></script><script src="polarization.js"></script><script src="advanced-optics.js"></script>
+<script src="wave-scene.js"></script><script src="wave-solver.js"></script><script src="wave-views.js"></script><script src="wave-storage.js"></script><script src="wave.js"></script>
+</body></html>
